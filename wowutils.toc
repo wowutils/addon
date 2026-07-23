@@ -2,7 +2,7 @@
 ## Title: wowutils
 ## Notes: wowutils data caching
 ## Author: Ironi
-## Version: 0.0.1beta
+## Version: 0.0.2beta
 ## IconTexture: Interface\AddOns\wowutils\media\logo.png
 ## DefaultState: enabled
 ## LoadSavedVariablesFirst: 1
