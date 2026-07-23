@@ -1,0 +1,27 @@
+## Interface: 120007
+## Title: wowutils
+## Notes: wowutils data caching
+## Author: Ironi
+## Version: 0.0.1beta
+## IconTexture: Interface\AddOns\wowutils\media\logo.png
+## DefaultState: enabled
+## LoadSavedVariablesFirst: 1
+## SavedVariables: WowUtilsDB
+## Category: wowutils
+## OptionalDeps: RCLootCouncil, wowutils_data
+
+embeds.xml
+enums.lua
+helpers.lua
+realms.lua
+config.lua
+database.lua
+mapping.lua
+core.lua
+communication.lua
+currency.lua
+items.lua
+events.lua
+rclc.lua
+dataImport.lua
+gui.lua
