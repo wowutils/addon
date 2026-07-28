@@ -49,7 +49,7 @@ end
 
 ns.events.eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 function ns.events.PLAYER_EQUIPMENT_CHANGED(...)
-  ns.items.CacheCraftingItems()
+  ns.items.CacheWatermarks()
 end
 
 ns.events.eventFrame:RegisterEvent("QUEST_LOG_UPDATE")

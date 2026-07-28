@@ -11,7 +11,7 @@ ns.rclc = {}
 local private = {}
 local rclcMod
 if C_AddOns.IsAddOnLoaded("RCLootCouncil") then
-  ns.rclc.actualAddon = LibStub("AceAddon-3.0"):GetAddon("RCLootCouncil")
+  ns.rclc.actualAddon = LibStub("AceAddon-3.0"):GetAddon("RCLootCouncil", true)
   if ns.rclc.actualAddon then
     rclcMod = ns.rclc.actualAddon:NewModule(moduleName, "AceHook-3.0")
   end
@@ -162,7 +162,7 @@ do
   ---@return table
   local function formatCurrencyLine(itemTrack, data)
     if not currencyData[itemTrack] then return { "Error", 1, 0, 0 } end
-    if not data then return ns.Debug.print("no 'data'") { "No Data/No Data", .92, .5, 0 } end
+    if not data then ns.Debug.print("no 'data'") return { "No Data/No Data", .92, .5, 0 } end
     local playerCurrency = data[currencyData[itemTrack].currencyId]
     if not playerCurrency then
       ns.Debug.print("no 'playercurrency'")
@@ -449,7 +449,6 @@ function rclcMod:GetScrollColIndexFromName(name)
 end
 
 function rclcMod.UpdateMainModCell(rowFrame, frame, data, cols, row, realrow, column, fShow, table, ...)
-  ASDF = { rowFrame, frame, data, cols, row, realrow, column, fShow, table }
   local name = data[realrow].name
   local guid = UnitGUID(Ambiguate(name, "short"))
   local n, s = strsplit("-", name)
