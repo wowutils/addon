@@ -32,6 +32,7 @@ ns.communication.msgHandlers[prefixes.normal] = function(prefix, msg, channel, s
   if UnitIsUnit("player", sender) then return end
   local uncompressedData, compressedData = strsplit("@", msg, 2)
   local msgType, dbVersion, configVersion, isCbor, idType, id = uncompressedData:match("^(.)(...)(...)(.)(.)(.-)$")
+  -- idType S == source guid, T == targetGuid, A meant for all, data from db and not from the character itself
   dbVersion = tonumber(dbVersion)
   configVersion = tonumber(configVersion)
   if not (dbVersion and configVersion and idType and id) then
@@ -73,7 +74,7 @@ ns.communication.msgHandlers[prefixes.normal] = function(prefix, msg, channel, s
     local dataType = dataString:sub(1, 1)
     if ns.mapping.toRealData[dataType] then
       ns.mapping.toRealData[dataType](configVersion, dbVersion, dataString:sub(2), nil, id, channel)
-    else
+    elseif ns.debugMode then
       geterrorhandler()("No handler found for data type: " .. dataType)
     end
     return
@@ -173,8 +174,56 @@ function private.updateCheck()
   private.sendAddonMessage(ns.enums.addonMessagesTypes.updateCheckForDesktopAppUsers, ns.mapping.GetMsgData(ns.enums.context.updateCheck, charDB), ns.enums.chatChannels.guild, "NORMAL", nil, false)
 end
 
-C_Timer.NewTicker(60, private.updateCheck)
-C_Timer.After(15, private.updateCheck)
+C_Timer.After(15, function()
+  private.updateCheck()
+  C_Timer.NewTicker(60, private.updateCheck)
+end)
+
+function private.whitelistDataUpdateCheck()
+  if ns.restrictedAddonMessages then return end -- unlike private.updateCheck, this actually takes resources to run, so skip checks during restrictions
+  for listId, charList in pairs(WowUtilsDB.syncLists) do
+    local slugToId = {}
+    local found = {}
+    for k,v in pairs(charList.characters) do -- TODO do this on data update, but good enough for now (beta)
+      slugToId[v] = k
+    end
+    local temp = {}
+    for guid, charData in pairs(WowUtilsDB.others) do -- TODO build slug to guid list somewhere thats kept up to date when new data is getting in (in theory slug can have multiple guids which makes it awkward)
+      if charData.droptimizerKey and slugToId[charData.droptimizerKey] then
+        found[slugToId[charData.droptimizerKey]] = true
+        table.insert(temp, {id = slugToId[charData.droptimizerKey], timestamp = ns.mapping.GetCharacterTimestampsForWideSync(charData)})
+      end
+    end
+    for k,v in pairs(slugToId) do
+      if not found[v] and not ns.database.ownSlugs[k] then
+        table.insert(temp, {id = v, timestamp = 0})
+      end
+    end
+    local str = ns.mapping.GetMsgData(ns.enums.context.whitelistCharSyncRequest, temp, nil, listId)
+    if str ~= "" then
+      ns.Debug.print("sending whitelistCharSyncRequest for list: '%s', total characters found: '%s'", listId, #temp)
+      private.sendAddonMessage(ns.enums.addonMessagesTypes.whitelistCharSyncRequest, str, ns.enums.chatChannels.guild, "BULK", nil, false)
+    end
+  end
+end
+C_Timer.After(30, function()
+  private.whitelistDataUpdateCheck()
+  C_Timer.NewTicker(60*5, private.whitelistDataUpdateCheck)
+  --C_Timer.NewTicker(30, private.whitelistDataUpdateCheck)
+end)
+
+function private.generalUpdateCheck()
+  if ns.restrictedAddonMessages then return end -- unlike private.updateCheck, this actually takes resources to run, so skip checks during restrictions
+  local str = ns.mapping.GetMsgData(ns.enums.context.generalUpdatedCheck)
+  if str == "" then return end
+  ns.Debug.print("sending generalUpdateCheck")
+  private.sendAddonMessage(ns.enums.addonMessagesTypes.generalUpdatedCheck, str, ns.enums.chatChannels.guild, "NORMAL", nil, false)
+end
+
+C_Timer.After(20, function()
+  private.generalUpdateCheck()
+  C_Timer.NewTicker(60*2, private.generalUpdateCheck)
+end)
 
 ---@param addonMessagesType string
 ---@return string?
@@ -289,6 +338,33 @@ do
 end
 do
   local lastSentTime = 0
+  ---@param listId string
+  function ns.communication.SendSyncList(listId)
+    if not WowUtilsDB.syncLists[listId] then return end
+    if GetTime() - lastSentTime < 5 then return end
+    if not IsInGuild() then return end
+    ns.Debug.print("sending full synclist information")
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.fullSynclistInformation, ns.mapping.GetMsgData(ns.enums.context.fullSynclistInformation, WowUtilsDB.syncLists[listId], nil, listId), ns.enums.chatChannels.guild, "NORMAL", nil, true)
+    lastSentTime = GetTime()
+  end
+end
+do
+  local cache = {}
+  ---@param listId string
+  ---@param currentTimestamp number?
+  function ns.communication.RequestSyncList(listId, currentTimestamp)
+    currentTimestamp = currentTimestamp or 0
+    if GetTime() - (cache[listId] or 0) < 5 then return end
+    if not IsInGuild() then return end
+    ns.Debug.print("requesting synclist information '%s'", listId)
+    local str = ns.mapping.GetMsgData(ns.enums.context.syncListRequest, listId, currentTimestamp)
+    if str == "" then return end
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.syncListRequest, str, ns.enums.chatChannels.guild, "NORMAL", nil, true)
+    cache[listId] = GetTime()
+  end
+end
+do
+  local lastSentTime = 0
   function ns.communication.SendCurrencyUpdate()
     if GetTime() - lastSentTime < .5 then return end
     ns.Debug.print("sending currency update")
@@ -326,6 +402,16 @@ do
     ns.Debug.print("sending current full char")
     private.sendAddonMessage(ns.enums.addonMessagesTypes.fullCharacterSync, ns.mapping.GetMsgData(ns.enums.context.fullCharacterSync, charDB), targetChannel, "NORMAL", nil, true)
     lastSentTime = GetTime()
+  end
+end
+do
+  local cache = {}
+  ---@param data wowutils_ownChar|wowutils_otherChar
+  function ns.communication.SendFullSyncFromSpecificCharacter(data)
+    if GetTime() - (cache[data.guid] or 0) < 5 then return end
+    ns.Debug.print("sending full char '%s'", data.droptimizerKey)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.fullCharacterSync, ns.mapping.GetMsgData(ns.enums.context.fullCharacterSyncFromDB, data), ns.enums.chatChannels.guild, "NORMAL", "A"..ns.mapping.ConvertGuidToMsgFormat(data.guid), true)
+    cache[data.guid] = GetTime()
   end
 end
 do

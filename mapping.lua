@@ -30,11 +30,11 @@ local currentUsage = {
   vaultData = "G",
   weeklyRewards = "H",
   quests = "I",
-  --["J"] = nil,
-  --["K"] = nil,
-  --["L"] = nil,
-  --["M"] = nil,
-  --["N"] = nil,
+  whitelistCharSyncRequest = "J",
+  fullCharacterSyncFromDB = "K",
+  fullSynclist = "L",
+  generalUpdateCheck = "M",
+  syncListRequest = "N",
   --["O"] = nil,
   --["P"] = nil,
   --["Q"] = nil,
@@ -100,13 +100,16 @@ ns.mapping = {
       local timestamp, watermarkStr = str:match("^(%d+)%?(.*)$")
       timestamp = ns.mapping.timestamp.FromValue(timestamp)
       if db and db.watermarksUpdated then
-        if db.watermarksUpdated >= timestamp then ns.Debug.print("already has newer data") return end -- Current data is newer, discard
+        if db.watermarksUpdated >= timestamp then
+          ns.Debug.print("already has newer data")
+          return
+        end                                                                                           -- Current data is newer, discard
       end
-      local splits = {strsplit("^", watermarkStr)}
+      local splits = { strsplit("^", watermarkStr) }
       local converted = {}
-      for _,v in pairs(splits) do
+      for _, v in pairs(splits) do
         local _slot, _mult, _rem = v:match("^(.)(.)(.)$") -- TODO switch to :subs? (benchmark)
-        local offset = ns.mapping.int.FromValue(_mult)*ns.config.watermarks.multiplier + ns.mapping.int.FromValue(_rem)
+        local offset = ns.mapping.int.FromValue(_mult) * ns.config.watermarks.multiplier + ns.mapping.int.FromValue(_rem)
         converted[ns.mapping.int.FromValue(_slot)] = offset > 0 and (offset + ns.config.watermarks.startingPoint) or 0
       end
       db.watermarksUpdated = timestamp
@@ -122,11 +125,11 @@ ns.mapping = {
       if not _cache[configVersion] then
         _cache[configVersion] = {}
       end
-      ns.Debug.print("receiving watermarks for '%s'", targetGuid)
+      ns.Debug.print("receiving currency for '%s'", targetGuid)
       local timestamp, currencyStr = str:match("^(%d+)%?(.*)$")
       timestamp = ns.mapping.timestamp.FromValue(timestamp)
       if db.currencyUpdated >= timestamp then return end -- Current data is newer, discard
-      local splits = {strsplit("^", currencyStr)}
+      local splits = { strsplit("^", currencyStr) }
       for _, v in pairs(splits) do
         local _currencyMapId, _current, _total = v:match("^(.)(%d+)%?(%d+)$")
         _currencyMapId = tonumber(_currencyMapId)
@@ -135,7 +138,7 @@ ns.mapping = {
         if _currencyMapId and _current and _total then
           local currencyId = _cache[configVersion][_currencyMapId]
           if not currencyId then
-            for cId,mapId in pairs(ns.config.currencies) do
+            for cId, mapId in pairs(ns.config.currencies) do
               if mapId == _currencyMapId then
                 _cache[configVersion][_currencyMapId] = cId
                 currencyId = cId
@@ -257,7 +260,7 @@ ns.mapping = {
       if db.questsUpdated >= timestamp then return end -- we already have newer data, discard
       ns.Debug.print("receiving quest update for '%s'", targetGuid)
 
-      for _, v in pairs({strsplit("^", questDataStr)}) do
+      for _, v in pairs({ strsplit("^", questDataStr) }) do
         local completed, completedWarbound, questId = v:match("^(.)(.)(.*)$")
         questId = tonumber(questId)
         if questId and ns.config.quests[questId] then
@@ -271,11 +274,164 @@ ns.mapping = {
       db.questsUpdated = timestamp
       db.lastUpdateReceived = GetServerTime()
     end,
-    --["J"] = nil,
-    --["K"] = nil,
-    --["L"] = nil,
-    --["M"] = nil,
-    --["N"] = nil,
+    [currentUsage.whitelistCharSyncRequest] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- J
+      if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
+      --[[
+       for _,v in pairs(data) do
+        tinsert(temp, sformat("%s?%s", v.id, v.timestamp))
+      end
+      return sformat("%s%s?%s", currentUsage.whitelistCharSyncRequest, key, tconcat(temp, "^"))
+      --]]
+      local listId, dataStr = strsplit("?", str, 2)
+      if not listId then return end
+      local targetList = WowUtilsDB.syncLists[listId] and WowUtilsDB.syncLists[listId].characters
+      if not targetList then return end
+      local cache -- TODO cache these on data update instead of here, good enough for now (beta)
+      for _, v in pairs({ strsplit("^", dataStr) }) do
+        local id, timestamp = strsplit("?", v)
+        ---@diagnostic disable-next-line: cast-local-type
+        id = tonumber(id)
+        ---@diagnostic disable-next-line: cast-local-type
+        timestamp = tonumber(timestamp)
+        if id and timestamp then
+          if targetList[id] then
+            if not cache then
+              cache = {}
+              -- use guids so we dont overwrite anything by accident
+              for guid, charData in pairs(WowUtilsDB.others) do
+                if charData.droptimizerKey then
+                  if cache[charData.droptimizerKey] then -- we have multiple data points for same key (guid has changed)
+                    if WowUtilsDB.others[cache[charData.droptimizerKey]].lastUpdate < charData.lastUpdate then
+                      cache[charData.droptimizerKey] = guid
+                    end
+                  else
+                    cache[charData.droptimizerKey] = guid
+                  end
+                end
+              end
+              for guid, charData in pairs(WowUtilsDB.ownCharacters) do
+                if charData.droptimizerKey then
+                  if cache[charData.droptimizerKey] then -- we have multiple data points for same key (guid has changed)
+                    if WowUtilsDB.ownCharacters[cache[charData.droptimizerKey]].lastUpdate < charData.lastUpdate then
+                      cache[charData.droptimizerKey] = guid
+                    end
+                  else
+                    cache[charData.droptimizerKey] = guid
+                  end
+                end
+              end
+            end
+            if cache[targetList[id]] then
+              local d = WowUtilsDB.ownCharacters[cache[targetList[id]]] or WowUtilsDB.others[cache[targetList[id]]]
+              if timestamp == 0 or ns.mapping.GetCharacterTimestampsForWideSync(d) > timestamp then
+                ns.communication.SendFullSyncFromSpecificCharacter(d)
+              end
+            end
+          end
+        end
+      end
+    end,
+    [currentUsage.fullCharacterSyncFromDB] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- K
+      if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
+      local targetGuid = ns.mapping.ConvertPartialGuidToGuid(partialGuid)
+      ns.Debug.print("receiving full character sync From DB '%s'", targetGuid)
+      if WowUtilsDB.ownCharacters[targetGuid] then return end -- don't accept syncs about own chars
+      local timestampLength = str:byte(1)
+      local timestamp = str:sub(2, 1 + timestampLength)
+      local cborStr = str:sub(2 + timestampLength)
+      ---@diagnostic disable-next-line: cast-local-type
+      timestamp = tonumber(timestamp)
+      if not timestamp then return end
+      local c = WowUtilsDB.others[targetGuid]
+      if c then
+        if ns.mapping.GetCharacterTimestampsForWideSync(c) >= timestamp then
+          return
+        end
+      end
+      local t = DeserializeCBOR(cborStr)
+      ---@cast t wowutils_otherChar
+      if not c then
+        WowUtilsDB.others[targetGuid] = t
+        WowUtilsDB.others[targetGuid].lastUpdateReceived = GetServerTime()
+        return
+      end
+      local updated = false
+      -- only catch whats new, just in case
+      if t.currencyUpdated > c.currencyUpdated then
+        updated = true
+        c.currency = t.currency
+      end
+      if t.watermarksUpdated > c.watermarksUpdated then
+        updated = true
+        c.watermarks = t.watermarks
+      end
+      if t.craftingItemsUpdated > c.craftingItemsUpdated then
+        updated = true
+        c.craftingItems = t.craftingItems
+      end
+      if t.questsUpdated > c.questsUpdated then
+        updated = true
+        c.quests = t.quests
+      end
+      if t.vaultDataLastUpdate > c.vaultDataLastUpdate then
+        updated = true
+        c.vaultData = t.vaultData
+      end
+      if t.weeklyRewardsUpdate > c.weeklyRewardsUpdate then
+        updated = true
+        c.weeklyRewards = t.weeklyRewards
+      end
+      if not updated then return end
+      c.lastUpdateReceived = GetServerTime()
+    end,
+    [currentUsage.fullSynclist] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- L
+      if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
+      local timestampLength = str:byte(1)
+      local timestamp = str:sub(2, 1 + timestampLength)
+      ---@diagnostic disable-next-line: cast-local-type
+      timestamp = tonumber(timestamp)
+      if not timestamp then return end
+      local listId, cborStr = strsplit("^", str:sub(2 + timestampLength), 2)
+      ns.Debug.print("receiving syncList '%s' - from '%s'", listId, partialGuid)
+      if WowUtilsDB.syncLists[listId] and WowUtilsDB.syncLists[listId].lastUpdate >= timestamp then
+        print("we already have newer data from synclist", listId)
+        return
+      end
+      local t = DeserializeCBOR(cborStr)
+      ---@cast t wowutilsSyncList
+      WowUtilsDB.syncLists[listId] = t
+      ns.Debug.print("Updated syncList '%s' - from '%s'", listId, partialGuid)
+    end,
+    --[[
+    for listId,listData in pairs(WowUtilsDB.syncLists) do
+      tinsert(temp, sformat("A%s?%s", listId, ns.mapping.timestamp.ToValue(listData.lastUpdate or 0)))
+    end
+    if #temp == 0 then return "" end
+    return sformat("%s%s", tconcat(temp, "^"))
+    ]]
+    [currentUsage.generalUpdateCheck] = function(configVersion, dbVersion, str, db, targetGuid, channel) -- M
+      if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
+      for _, dataStr in pairs({ strsplit("^", str) }) do
+        local dataType = dataStr:sub(1, 1)
+        if dataType == "A" then
+          local listId, timestamp = strsplit("?", dataStr:sub(2))
+          if listId and timestamp then
+            if not WowUtilsDB.syncLists[listId] or WowUtilsDB.syncLists[listId].lastUpdate < ns.mapping.timestamp.FromValue(timestamp) then
+              ns.communication.RequestSyncList(listId, (WowUtilsDB.syncLists[listId] and WowUtilsDB.syncLists[listId].lastUpdate or 0))
+            end
+          end
+        end
+      end
+    end,
+    [currentUsage.syncListRequest] = function(configVersion, dbVersion, str, db, targetGuid, channel) -- N
+      if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
+      local listId, timestamp = strsplit("?", str)
+      ---@diagnostic disable-next-line: cast-local-type
+      timestamp = tonumber(timestamp)
+      if not (listId and timestamp) then return end
+      if not WowUtilsDB.syncLists[listId] or WowUtilsDB.syncLists[listId].lastUpdate <= timestamp then return end
+      ns.communication.SendSyncList(listId)
+    end
     --["O"] = nil,
     --["P"] = nil,
     --["Q"] = nil,
@@ -334,8 +490,8 @@ local numberConverts = {
   },
 }
 do
-  local t = {"1","2","3","4","5","6","7","8","9","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z"}
-  for k,v in ipairs(t) do
+  local t = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z" }
+  for k, v in ipairs(t) do
     numberConverts.fromInt[k] = v
     numberConverts.toInt[v] = k
   end
@@ -427,7 +583,10 @@ do
     ---@return string
     ConvertToTriState = function(value)
       if value == nil then return "0" end
-      if type(value) ~= "boolean" then geterrorhandler() return "2" end -- should be the least meaningful fallback
+      if type(value) ~= "boolean" then
+        geterrorhandler()
+        return "2"
+      end                                                               -- should be the least meaningful fallback
       return mapTo[value]
     end,
     ---@param value string
@@ -441,14 +600,28 @@ do
       if value then return "1" else return "2" end
     end,
 
-    ---@param value string 
+    ---@param value string
     ---@return boolean
     MapValueToBoolean = function(value)
       return value == "1"
     end,
   }
 end
-
+do
+  local timestamps = {
+    "currencyUpdated", "watermarksUpdated", "craftingItemsUpdated", "questsUpdated", "vaultDataLastUpdate", "weeklyRewardsUpdate"
+  }
+  local sumOffset = #timestamps * ns.config.timestampOffset
+  ---@param char wowutils_otherChar
+  ---@return number summedTimestamps
+  function ns.mapping.GetCharacterTimestampsForWideSync(char)
+    local sum = 0
+    for i = 1, #timestamps do
+      sum = sum + (char[timestamps[i]] or 0)
+    end
+    return sum - sumOffset
+  end
+end
 ---@param context wowutils_enums_context
 ---@param data any
 ---@param timestamp number?
@@ -458,12 +631,12 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
   if context == ns.enums.context.watermarks then
     ---@cast timestamp number
     local t = {}
-    for slotId,discountItemLevel in pairs(data) do
+    for slotId, discountItemLevel in pairs(data) do
       local dif = discountItemLevel - ns.config.watermarks.startingPoint
       if dif > 0 then
         tinsert(t, sformat("%s%s%s",
           ns.mapping.int.ToValue(slotId),
-          ns.mapping.int.ToValue(floor(dif/ns.config.watermarks.multiplier)),
+          ns.mapping.int.ToValue(floor(dif / ns.config.watermarks.multiplier)),
           ns.mapping.int.ToValue(dif % ns.config.watermarks.multiplier))
         )
       else
@@ -482,7 +655,7 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
       end
     end
     if #t > 0 then
-      return sformat("%s%s?%s", currentUsage.currency, ns.mapping.timestamp.ToValue(timestamp or 0) ,tconcat(t, "^"))
+      return sformat("%s%s?%s", currentUsage.currency, ns.mapping.timestamp.ToValue(timestamp or 0), tconcat(t, "^"))
     else
       return ""
     end
@@ -518,18 +691,31 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
     local lastUpdate = tostring(t.lastUpdate or 0)
     return sformat("%s%s%s%s", currentUsage.fullCharacterSync, string.char(#lastUpdate), lastUpdate, SerializeCBOR(t))
   end
+  if context == ns.enums.context.fullCharacterSyncFromDB then
+    ---@cast data wowutils_ownChar|wowutils_ownChar
+    local t
+    if data.lastLogout then
+      t = CopyTable(data)
+      t.lastLogout = nil
+      t.lastUpdateReceived = nil
+    else
+      t = data
+    end
+    local summedTimestamps = tostring(ns.mapping.GetCharacterTimestampsForWideSync(t))
+    return sformat("%s%s%s%s", currentUsage.fullCharacterSyncFromDB, string.char(#summedTimestamps), summedTimestamps, SerializeCBOR(t))
+  end
   if context == ns.enums.context.updateCheck then
     ---@cast data wowutils_ownChar
     local serverTime = GetServerTime()
     local t = {
-      ns.mapping.timestamp.ToValue(serverTime), -- 1
-      math.abs(serverTime-(data.currencyUpdated or 0)), -- 2
-      math.abs(serverTime-(data.questsUpdated or 0)), -- 3
-      math.abs(serverTime-(data.watermarksUpdated or 0)), -- 4
-      math.abs(serverTime-(data.craftingItemsUpdated or 0)), -- 5
-      math.abs(serverTime-(data.vaultDataLastUpdate or 0)), -- 6
-      math.abs(serverTime-(data.weeklyRewardsUpdate or 0)), -- 7
-      math.abs(serverTime-(WowUtilsDB.droptimizerData[ns.me.droptimizerKey] and WowUtilsDB.droptimizerData[ns.me.droptimizerKey].lastUpdate or 0)), -- 8
+      ns.mapping.timestamp.ToValue(serverTime),                                                                                                     -- 1
+      math.abs(serverTime - (data.currencyUpdated or 0)),                                                                                           -- 2
+      math.abs(serverTime - (data.questsUpdated or 0)),                                                                                             -- 3
+      math.abs(serverTime - (data.watermarksUpdated or 0)),                                                                                         -- 4
+      math.abs(serverTime - (data.craftingItemsUpdated or 0)),                                                                                      -- 5
+      math.abs(serverTime - (data.vaultDataLastUpdate or 0)),                                                                                       -- 6
+      math.abs(serverTime - (data.weeklyRewardsUpdate or 0)),                                                                                       -- 7
+      math.abs(serverTime - (WowUtilsDB.droptimizerData[ns.me.droptimizerKey] and WowUtilsDB.droptimizerData[ns.me.droptimizerKey].lastUpdate or 0)), -- 8
       ns.me.droptimizerKey,
     }
     return tconcat(t, "^")
@@ -552,12 +738,39 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
     end
     return sformat("%s%s?%s", currentUsage.quests, ns.mapping.timestamp.ToValue(timestamp or 0), tconcat(t, "^"))
   end
+  if context == ns.enums.context.whitelistCharSyncRequest then
+    ---@cast data table
+    local temp = {}
+    for _, v in pairs(data) do
+      tinsert(temp, sformat("%s?%s", v.id, v.timestamp))
+    end
+    if #temp == 0 then return "" end
+    return sformat("%s%s?%s", currentUsage.whitelistCharSyncRequest, key, tconcat(temp, "^"))
+  end
+  if context == ns.enums.context.fullSynclistInformation then
+    ---@cast data wowutilsSyncList
+    return sformat("%s%s%s%s^%s", currentUsage.fullSynclist, string.char(#tostring(data.lastUpdate or 0)), (data.lastUpdate or 0), key, SerializeCBOR(data))
+  end
+  if context == ns.enums.context.generalUpdatedCheck then
+    local temp = {}
+    -- we are currently only checking syncLists through this TODO only sync lists with at least one guild member
+    for listId, listData in pairs(WowUtilsDB.syncLists) do
+      tinsert(temp, sformat("A%s?%s", listId, ns.mapping.timestamp.ToValue(listData.lastUpdate or 0)))
+    end
+    if #temp == 0 then return "" end
+    return sformat("%s%s", currentUsage.generalUpdateCheck, tconcat(temp, "^"))
+  end
+  if context == ns.enums.context.syncListRequest then
+    return sformat("%s%s?%s", currentUsage.syncListRequest, data, timestamp)
+  end
   geterrorhandler()("Unknown context: " .. tostring(context))
   return ""
 end
+
 function ns.mapping.ConvertGuidToMsgFormat(guid)
   return (guid:gsub("Player%-", "", 1))
 end
+
 function ns.mapping.ConvertPartialGuidToGuid(partialGuid)
-  return "Player-"..partialGuid
+  return "Player-" .. partialGuid
 end

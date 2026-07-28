@@ -23,6 +23,11 @@ ns.enums = {
     vaultData = "vaultData",
     weeklyRewards = "weeklyRewards",
     quests = "quests",
+    whitelistCharSyncRequest = "whitelistCharSyncRequest",
+    fullCharacterSyncFromDB = "fullCharacterSyncFromDB",
+    fullSynclistInformation = "fullSynclistInformation",
+    generalUpdatedCheck = "generalUpdatedCheck",
+    syncListRequest = "syncListRequest",
   },
   ---@enum wowutils_enums_addonMessageTypes
   addonMessagesTypes = {
@@ -38,6 +43,10 @@ ns.enums = {
     currencyUpdate = "J",
     watermarkUpdate = "K",
     craftingItemUpdate = "L",
+    whitelistCharSyncRequest = "M",
+    fullSynclistInformation = "N",
+    generalUpdatedCheck = "O",
+    syncListRequest = "P",
   },
   ---@class wowutils_enums_chatChannels
   chatChannels = {

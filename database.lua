@@ -13,6 +13,11 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@field debug boolean?
 ---@field lastSeenWeeklyReset number
 ---@field lastDataImport number?
+---@field syncLists table<string, wowutilsSyncList>
+
+---@class wowutilsSyncList
+---@field lastUpdate number
+---@field characters table<number, string> id, slug
 
 ---@class wowutils_lastChar
 ---@field guid string
@@ -107,7 +112,7 @@ local GetServerTime, sformat = GetServerTime, string.format
 
 ---@class wowutilsDroptimizerData_wishlistItem
 ---@field equipmentSlot number
----@field priority number
+---@field priority string
 ---@field updated number
 ---@field difficultyId number
 ---@field itemId number
@@ -121,6 +126,7 @@ WowUtilsDB = WowUtilsDB or {
   others = {},
   droptimizerData = {},
   lastSeenWeeklyReset = C_DateAndTime.GetWeeklyResetStartTime(),
+  syncLists = {},
 }
 
 if not WowUtilsDB.ownCharacters[ns.me.guid] then
@@ -157,7 +163,9 @@ else
   WowUtilsDB.ownCharacters[ns.me.guid].region = ns.me.regionId
   WowUtilsDB.ownCharacters[ns.me.guid].lastWeeklyReset = C_DateAndTime.GetWeeklyResetStartTime()
 end
-
+if not WowUtilsDB.syncLists then
+  WowUtilsDB.syncLists = {}
+end
 ---@type wowutils_ownChar
 local charDB = WowUtilsDB.ownCharacters[ns.me.guid]
 local db = WowUtilsDB
@@ -168,7 +176,10 @@ end
 
 ---@class wowutils_database
 ns.database = {}
-
+ns.database.ownSlugs = {}
+for k,v in pairs(WowUtilsDB.ownCharacters) do
+  ns.database.ownSlugs[v.droptimizerKey] = true
+end
 
 local function contextUpdated(context)
   local serverTime = GetServerTime()

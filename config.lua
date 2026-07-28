@@ -16,7 +16,7 @@ ns.hasDataAddon = WowUtilsPublicDataAPI and true or false
 ---@class wowutils_config
 ns.config = {
   timestampOffset = 1767225600, -- 	01/01/26 00:00:00 UTC
-  currentDBVersion = 1,
+  currentDBVersion = 2,
   configVersion = 1,
   watermarks = {
     startingPoint = 250,

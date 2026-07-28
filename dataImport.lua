@@ -14,6 +14,20 @@ local addon_name, ns = ...
 ---@field schemaVersion number
 ---@field groupId string
 ---@field characters wowutilsData_import_character[]
+---@field syncList wowutilsData_import_syncList?
+---@field wishlistMapping table<string, string>?
+
+---@class wowutilsData_import_syncList
+---@field listId string
+---@field listVersion number update time
+---@field characters wowutilsData_import_syncList_characters[]
+
+---@class wowutilsData_import_syncList_characters
+---@field id number
+---@field name string
+---@field realmId number
+---@field realm string
+---@field region string
 
 ---@class wowutilsData_import_character
 ---@field characterId string lowercase slug
@@ -163,8 +177,9 @@ function private.ParseDroptimizerItems(d)
 end
 
 ---@param d wowutilsData_import_wishlist[]
+---@param wishlistMapping table<string, string>?
 ---@return table<string, wowutilsDroptimizerData_wishlistItem>
-function private.ParseWishlistItems(d)
+function private.ParseWishlistItems(d, wishlistMapping)
   ---@type table<string, wowutilsDroptimizerData_wishlistItem>
   local t = {}
   for _,v in pairs(d) do
@@ -177,7 +192,7 @@ function private.ParseWishlistItems(d)
       difficultyId = difId,
       equipmentSlot = private.GetEquipmentSlotId(v.slot),
       itemId = v.itemId,
-      priority = v.priority,
+      priority = wishlistMapping and wishlistMapping[tostring(v.priority)] or tostring(v.priority),
       updated = v.updatedAt,
       note = v.note
     }
@@ -241,12 +256,28 @@ function ns.dataImport.ImportDroptimizers()
           end
         end
         -- just replace the whole thing if our data is newer
-        targetDB.wishlist = private.ParseWishlistItems(charData.wishlist)
+        targetDB.wishlist = private.ParseWishlistItems(charData.wishlist, groupData.wishlistMapping)
         targetDB.lastUpdate = t.writtenAt
       end
     end
+    if groupData.syncList then
+      if not WowUtilsDB.syncLists[groupData.syncList.listId] or WowUtilsDB.syncLists[groupData.syncList.listId].lastUpdate < groupData.syncList.listVersion then
+        if WowUtilsDB.syncLists[groupData.syncList.listId] then
+          wipe(WowUtilsDB.syncLists[groupData.syncList.listId].characters)
+        else
+          ---@diagnostic disable-next-line: missing-fields
+          WowUtilsDB.syncLists[groupData.syncList.listId] = {
+            characters = {}
+          }
+        end
+        local targetList = WowUtilsDB.syncLists[groupData.syncList.listId]
+        targetList.lastUpdate = groupData.syncList.listVersion
+        for _, charData in pairs(groupData.syncList.characters) do
+          targetList.characters[charData.id] = sformat("%s-%s", charData.name:lower(), charData.realmId)
+        end
+      end
+    end
   end
-
   WowUtilsDB.lastDataImport = t.writtenAt
 end
 ns.dataImport.ImportDroptimizers()

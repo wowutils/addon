@@ -162,14 +162,23 @@ local function ApplyRowClassBackdrop(row, classValue)
 end
 local function GetCharacterList()
   local list = {}
-
+  local droptimizerKeysToSynclist = {}
+  for listId,listData in pairs(WowUtilsDB.syncLists) do
+    for _, droptimizerKey in pairs(listData.characters) do
+      if not droptimizerKeysToSynclist[droptimizerKey] then
+        droptimizerKeysToSynclist[droptimizerKey] = {}
+      end
+      tinsert(droptimizerKeysToSynclist[droptimizerKey], listId)
+    end
+  end
   for _, data in pairs(WowUtilsDB.ownCharacters) do
     tinsert(list, {
       kind = "character",
       data = data,
       name = data.fullSlug or UNKNOWN,
       update = data.lastUpdateReceived or data.lastUpdate or 0,
-      class = data.class
+      class = data.class,
+      syncLists = droptimizerKeysToSynclist[data.droptimizerKey]
     })
   end
 
@@ -179,7 +188,8 @@ local function GetCharacterList()
       data = data,
       name = data.fullSlug or UNKNOWN,
       update = data.lastUpdateReceived or data.lastUpdate or 0,
-      class = data.class
+      class = data.class,
+      syncLists = droptimizerKeysToSynclist[data.droptimizerKey]
     })
   end
 
@@ -563,7 +573,7 @@ local function SetupList(parent, getEntries, onSelect)
 
       local label = entry.name or "?"
       if entry.kind == "character" then
-        label = label .. " " .. ns.helpers.GetFormatedLastUpdateTime(entry.update or 0)
+        label = sformat("%s %s%s%s", label, ns.helpers.GetFormatedLastUpdateTime(entry.update or 0), entry.syncLists and " SyncLists: " or "", entry.syncLists and table.concat(entry.syncLists, ", ") or "")
       else
         label = label .. " - " .. tostring(entry.key or "Unknown")
         label = label .. " " .. ns.helpers.GetFormatedLastUpdateTime(entry.update or 0)
@@ -616,7 +626,7 @@ function GUI:Create()
 
   local subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   subtitle:SetPoint("LEFT", title, "RIGHT", 10, 0)
-  subtitle:SetText("Database explorer")
+  subtitle:SetText("Database explorer (for debugging purposes only)")
   subtitle:SetTextColor(unpack(COLORS.muted))
 
   local closeBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
