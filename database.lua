@@ -320,17 +320,15 @@ function ns.database.SaveToCurrentCharacterDB(context, id, data)
     end
     for questId,d in pairs(data) do
       if not charDB.quests[questId] then
-        if not charDB.quests[questId] then
+        charDB.quests = data
+        contextUpdated(context)
+        return
+      end
+      for _k, _v in pairs(d) do
+        if charDB.quests[questId][_k] ~= _v then
           charDB.quests = data
           contextUpdated(context)
           return
-        end
-        for _k, _v in pairs(d) do
-          if charDB[questId][_k] ~= _v then
-            charDB.quests = data
-            contextUpdated(context)
-            return
-          end
         end
       end
     end

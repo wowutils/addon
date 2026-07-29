@@ -444,11 +444,9 @@ end
 do
   local lastSentTime = 0
   function ns.communication.SendQuestUpdate()
-    function ns.communication.SendWeeklyRewardsUpdate()
-      if GetTime() - lastSentTime < 1 then return end
-      private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.quests, charDB.quests, charDB.questsUpdated or 0), ns.enums.chatChannels.guild, "NORMAL", nil, false)
-      lastSentTime = GetTime()
-    end
+    if GetTime() - lastSentTime < 1 then return end
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.quests, charDB.quests, charDB.questsUpdated or 0), ns.enums.chatChannels.guild, "NORMAL", nil, false)
+    lastSentTime = GetTime()
   end
 end
 do
