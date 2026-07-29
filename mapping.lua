@@ -394,7 +394,7 @@ ns.mapping = {
       local listId, cborStr = strsplit("^", str:sub(2 + timestampLength), 2)
       ns.Debug.print("receiving syncList '%s' - from '%s'", listId, partialGuid)
       if WowUtilsDB.syncLists[listId] and WowUtilsDB.syncLists[listId].lastUpdate >= timestamp then
-        print("we already have newer data from synclist", listId)
+        ns.Debug.print("already have newer data from synclist '%s'", listId)
         return
       end
       local t = DeserializeCBOR(cborStr)
