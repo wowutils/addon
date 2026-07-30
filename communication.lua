@@ -202,7 +202,7 @@ function private.whitelistDataUpdateCheck()
     local str = ns.mapping.GetMsgData(ns.enums.context.whitelistCharSyncRequest, temp, nil, listId)
     if str ~= "" then
       ns.Debug.print("sending whitelistCharSyncRequest for list: '%s', total characters found: '%s'", listId, #temp)
-      private.sendAddonMessage(ns.enums.addonMessagesTypes.whitelistCharSyncRequest, str, ns.enums.chatChannels.guild, "BULK", nil, false)
+      private.sendAddonMessage(ns.enums.addonMessagesTypes.whitelistCharSyncRequest, str, ns.enums.chatChannels.guild, "NORMAL", nil, false)
     end
   end
 end
