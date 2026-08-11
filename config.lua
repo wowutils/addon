@@ -17,30 +17,33 @@ ns.hasDataAddon = WowUtilsPublicDataAPI and true or false
 ns.config = {
   timestampOffset = 1767225600, -- 	01/01/26 00:00:00 UTC
   currentDBVersion = 2,
-  configVersion = 1,
+  configVersion = 2,
   watermarks = {
     startingPoint = 250,
     multiplier = 50,
   },
   currencies = { -- Cached on login and CURRENCY_DISPLAY_UPDATE
     -- Crests
-    [3341] = 1, -- Veteran
-    [3343] = 2, -- Champion
-    [3345] = 3, -- Hero
-    [3347] = 4, -- Mythic
+    [3443] = 1, -- Veteran
+    [3444] = 2, -- Champion
+    [3445] = 3, -- Hero
+    [3446] = 4, -- Mythic
 
     -- Conversion
-    [3378] = 5,
+    [3465] = 5,
+
+    -- Bonus rolls
+    [3418] = 6, -- Nebulous Voidcore
   },
   items = { -- Cached on login and BAG_UPDATE_DELAYED
-    craftingItems = 232875, -- Spark of Radiance
+    craftingItems = 274476, -- Spark of Tides
   },
   quests = {
     --[93695] = {  -- for testing purposes, lw quest
       --isWeeklyQuest = true,
     --},
-    [95155] = {}, -- Nulleus ??, could actually be 95154
-    [92600] = {}, -- Cracked Keystone (Midnight S1?)
+    --[95155] = {}, -- Nulleus ??, could actually be 95154
+    [97910] = {}, -- Cracked Keystone (Midnight S2)
     [96410] = {}, -- Seeking Knowledge Week 1 of 5: The Omnium Folio
     [96441] = {}, -- Seeking Knowledge Week 2 of 5: Ritualized Arcana
     [96442] = {}, -- Seeking Knowledge Week 3 of 5: Ley Line Assaults

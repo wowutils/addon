@@ -28,6 +28,7 @@ ns.enums = {
     fullSynclistInformation = "fullSynclistInformation",
     generalUpdatedCheck = "generalUpdatedCheck",
     syncListRequest = "syncListRequest",
+    bonusCoin = "bonusCoin",
   },
   ---@enum wowutils_enums_addonMessageTypes
   addonMessagesTypes = {
@@ -51,9 +52,9 @@ ns.enums = {
   ---@class wowutils_enums_chatChannels
   chatChannels = {
     guild = "guild",
-    instance = "instance_chat",
-    party = "party",
-    raid = "raid",
+    --instance = "instance_chat",
+    --party = "party",
+    --raid = "raid",
   },
   ---@enum wowutils_enums_simTypes
   simTypes = {

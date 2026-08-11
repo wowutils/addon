@@ -1,11 +1,36 @@
 ---@class wowutilsPrivate
 ---@field helpers wowutils_helpers
+---@field Debug wowutilsDebug
 
 ---@type string, wowutilsPrivate
 local addon_name, ns = ...
 local sformat = string.format
 ---@class wowutils_helpers
 ns.helpers = {}
+
+---@class wowutilsDebug
+---@field print fun(formatStr:string, ...:any)
+---@field AddToDevTool fun(data:any, displayName:string?)
+ns.Debug = {}
+
+function ns.Debug.print(str, ...)
+  if not ns.debugMode then return end
+  local args = { ... }
+  for k, v in ipairs(args) do
+    args[k] = tostring(v)
+  end
+  local success, error = pcall(function()
+    print(string.format("%s WowUtilsDebug - %s", GetTime(), (#args > 0 and str:format(unpack(args))) or str))
+    return true
+  end)
+  if success then return end
+  print("Error from Debug.print:", error, "str :", str)
+end
+function ns.Debug.AddToDevTool(data, displayName)
+  if not ns.debugMode then return end
+  if not DevTool then return end
+  DevTool:AddData(data, displayName)
+end
 
 do
   --local timeFormat  = sformat("%s%%s", CreateAtlasMarkup("questlog-questtypeicon-clockyellow"))
@@ -31,6 +56,7 @@ end
 
 do
   local map = {
+    -- Midnight S1
     ["12769"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_1
     ["12770"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_2
     ["12771"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_3
@@ -79,6 +105,58 @@ do
     ["12808"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_8
     ["13654"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_10 voidforged
     ["13786"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_9 sporefused
+
+    -- Midnight S2
+    
+    ["12817"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_1
+    ["12818"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_2
+    ["12819"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_3
+    ["12820"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_4
+    ["12821"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_5
+    ["12822"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_6
+    ["12823"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_7
+    ["12824"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_8
+
+    ["12825"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_1
+    ["12826"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_2
+    ["12827"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_3
+    ["12828"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_4
+    ["12829"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_5
+    ["12830"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_6
+    ["12831"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_7
+    ["12832"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_8
+
+    ["12833"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_1
+    ["12834"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_2
+    ["12835"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_3
+    ["12836"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_4
+    ["12837"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_5
+    ["12838"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_6
+    ["12839"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_7
+    ["12840"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_8
+
+    ["12841"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_1
+    ["12842"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_2
+    ["12843"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_3
+    ["12844"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_4
+    ["12845"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_5
+    ["12846"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_6
+    ["12847"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_7
+    ["12848"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_8
+    --["123456789"] = ,-- UpgradeTrack_Hero_9 NYI
+    --["123456789"] = ,-- UpgradeTrack_Hero_10 NYI
+
+    ["12849"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_1
+    ["12850"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_2
+    ["12851"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_3
+    ["12852"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_4
+    ["12853"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_5
+    ["12854"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_6
+    ["12855"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_7
+    ["12856"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_8
+    ["13848"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_9 very rare?
+    --["123456879"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_10 NYI
+
   }
   local contextToItemTrack = {
     ["raid-finder"] = ns.enums.itemTrack.veteran,

@@ -47,7 +47,7 @@ do
         local ci = C_CurrencyInfo.GetCurrencyInfo(currencyId)
         currencyData[mapIdToFind[2]] = {
           currencyId = currencyId,
-          format = sformat("%s Current: %%s - Earned: %%s", CreateSimpleTextureMarkup(ci.iconFileID)),
+          format = sformat("%s Current: %%s - Earned: %%s", CreateSimpleTextureMarkup(ci and ci.iconFileID or 134400)),
         }
         break
       end
@@ -323,7 +323,7 @@ do
     end
     if playerData then
       --local itemUpgradeInfo  = C_Item.GetItemUpgradeInfo(itemInfo.itemLink)
-      tooltip:AddDoubleLine("Currency", ns.helpers.GetFormatedLastUpdateTime(playerData.currencyUpdated))
+      tooltip:AddDoubleLine("Currency", ns.helpers.GetFormatedLastUpdateTime(playerData.dataRefreshTimes and playerData.dataRefreshTimes.currency or playerData.currencyUpdated))
       if itemInfo.itemTrack == ns.enums.itemTrack.none then
         tooltip:AddLine(unpack(formatCurrencyLine(ns.enums.itemTrack.myth, playerData.currency)))
         tooltip:AddLine(unpack(formatCurrencyLine(ns.enums.itemTrack.hero, playerData.currency)))
@@ -335,7 +335,7 @@ do
         tooltip:AddLine(unpack(formatCurrencyLine("convert", playerData.currency)))
       end
       if itemInfo.watermarkSlot then
-        tooltip:AddDoubleLine("Watermarks", ns.helpers.GetFormatedLastUpdateTime(playerData.watermarksUpdated or 0))
+        tooltip:AddDoubleLine("Watermarks", ns.helpers.GetFormatedLastUpdateTime(playerData.dataRefreshTimes and playerData.dataRefreshTimes.watermarks or playerData.watermarksUpdated or 0))
         if playerData.watermarks then
           if weaponSlots[itemInfo.watermarkSlot] then
             tooltip:AddLine(

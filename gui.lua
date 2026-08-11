@@ -280,7 +280,7 @@ local function BuildDetailTextForCharacter(char)
     local current = currencyData and currencyData.current or "-"
     local totalEarned = currencyData and currencyData.totalEarned or "-"
     local ci = C_CurrencyInfo.GetCurrencyInfo(currencyId)
-    tinsert(lines, pad(sformat("%s %s/%s", C_CurrencyInfo.GetCurrencyLink(currencyId) or ci.name or UNKNOWN, current, totalEarned)))
+    tinsert(lines, pad(sformat("%s %s/%s", C_CurrencyInfo.GetCurrencyLink(currencyId) or ci and ci.name or UNKNOWN, current, totalEarned)))
   end
     if not currencyFound then
     tinsert(lines, pad("none"))
@@ -304,6 +304,14 @@ local function BuildDetailTextForCharacter(char)
     tinsert(lines, pad(sformat("%s: %s", slotName, ilvl)))
   end
   if not watermarksFound then
+    tinsert(lines, pad("none"))
+  end
+  tinsert(lines, "Bonus coin usage: " .. ns.helpers.GetFormatedLastUpdateTime(char.bonusCoinUsageUpdated))
+  if char.bonusCoinUsage and #char.bonusCoinUsage > 0 then
+    for _, v in ipairs(char.bonusCoinUsage) do
+      tinsert(lines, pad(sformat("%s %s", v.itemLink, ns.helpers.GetFormatedLastUpdateTime(v.receiveTime))))
+    end
+  else
     tinsert(lines, pad("none"))
   end
   return table.concat(lines, "\n")

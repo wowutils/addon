@@ -2,6 +2,7 @@
 ---@field events wowutils_events
 ---@field restrictedAddonMessages boolean
 ---@field InLoadingScreen boolean
+---@field currentGuildSlugs table<string, boolean>
 
 ---@type string, wowutilsPrivate
 local addon_name, ns = ...
@@ -11,6 +12,7 @@ ns.InLoadingScreen = true
 ns.events = {
   eventFrame = CreateFrame("frame")
 }
+ns.currentGuildSlugs = {}
 local private = {}
 ns.events.eventFrame:SetScript("OnEvent", function(self, event, ...)
   ns.events[event](...)
@@ -21,11 +23,14 @@ function ns.events.CURRENCY_DISPLAY_UPDATE(...)
   ns.currency.CURRENCY_DISPLAY_UPDATE(...)
 end
 
-ns.events.eventFrame:RegisterEvent("ADDON_LOADED")
-function ns.events.ADDON_LOADED(...)
-
+ns.events.eventFrame:RegisterEvent("BONUS_ROLL_RESULT")
+function ns.events.BONUS_ROLL_RESULT(...)
+  ns.items.CacheBonusRollResult(...)
 end
-
+ns.events.eventFrame:RegisterEvent("SPELL_CONFIRMATION_PROMPT")
+function ns.events.SPELL_CONFIRMATION_PROMPT(...)
+  ns.items.CacheBonusRollPopup(...)
+end
 ns.events.eventFrame:RegisterEvent("PLAYER_LOGIN")
 function ns.events.PLAYER_LOGIN(...)
   ns.items.CacheWatermarks()
@@ -60,6 +65,20 @@ end
 ns.events.eventFrame:RegisterUnitEvent("PLAYER_GUILD_UPDATE", "player")
 function ns.events.PLAYER_GUILD_UPDATE(unitId)
   local guildName, _, _, guildRealm = GetGuildInfo("player")
+  wipe(ns.currentGuildSlugs)
+  C_GuildInfo.GuildRoster() -- requests update to roster
+  C_Timer.After(0.2, function()
+      local name, rankName, rankIndex, level, classDisplayName, zone, publicNote, officerNote, isOnline, status, class, achievementPoints, achievementRank, isMobile, canSoR, repStanding, guid
+      for i = 1, 1000 do
+          name, rankName, rankIndex, level, classDisplayName, zone, publicNote, officerNote, isOnline, status, class, achievementPoints, achievementRank, isMobile, canSoR, repStanding, guid = GetGuildRosterInfo(i)
+          if not name then
+              break
+          end
+          local charName, server = strsplit("-", name)
+          ns.currentGuildSlugs[string.format("%s-%d", charName, ns.GetRealmId(nil, server)):lower()] = true
+      end
+      ns.database.CheckEligibleSyncLists()
+  end)
   if not guildName then
     ns.Debug.print("Currently not in a guild")
     ns.me.guildInfo = nil

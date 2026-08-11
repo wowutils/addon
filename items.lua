@@ -16,7 +16,35 @@ function ns.items.CacheWatermarks()
 end
 
 function ns.items.CacheCraftingItems()
-  ns.Debug.print("checking crafting items")
   local craftingItems = C_Item.GetItemCount(ns.config.items.craftingItems, true, nil, true) or 0
   ns.database.SaveToCurrentCharacterDB(ns.enums.context.craftingItems, nil, craftingItems)
+end
+local cachedPopup = {}
+function ns.items.CacheBonusRollPopup(spellID, effectValue, message, duration, currencyTypesID, currencyCost, currentDifficulty, displayItemID, itemContext, treasureContextLevel)
+  if currencyTypesID ~= 3418 then return end -- Nebulous Voidcore
+  ns.Debug.print("Caching bonus roll popup data")
+  local _, encounterId = GetJournalInfoForSpellConfirmation(spellID)
+  local _, _, dif, _, _, _, _, instanceID, _, _, hasWorldTier = GetInstanceInfo()
+  cachedPopup = {
+    expirationTime = GetTime() + (duration or 5),
+    startTime = GetTime(),
+    encounterId = encounterId or 0,
+    difId = dif,
+    instanceId = instanceID,
+  }
+end
+function ns.items.CacheBonusRollResult(typeIdentifier, itemLink, quantity, specID, sex, personalLootToast, currencyID, isSecondaryResult, corrupted)
+  ns.Debug.print("Bonus coin used")
+  if ns.currency.lastBonusCoinUsed + 1 <= GetTime() then return end -- not actual bonus coin
+  local hasValidCacheData = (cachedPopup.expirationTime or 0) + 5 > GetTime() and (cachedPopup.startTime) > GetTime()
+  ns.Debug.print("Saving bonus coin - hasValidCacheData '%s'", hasValidCacheData)
+  ns.database.SaveToCurrentCharacterDB(ns.enums.context.bonusCoin, nil, {
+    difId = hasValidCacheData and cachedPopup.difId or 0,
+    itemLink = itemLink or "",
+    encounterId = hasValidCacheData and cachedPopup.encounterId or 0,
+    receiveTime = GetServerTime(),
+    specId = specID or 0,
+    season = C_MythicPlus.GetCurrentSeason(),
+    instanceId = hasValidCacheData and cachedPopup.instanceId or 0,
+  })
 end

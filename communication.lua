@@ -29,6 +29,7 @@ local charDB = ns.database.GetCurrentCharDB()
 local allCharsDB = ns.database.GetAllCharsDB()
 
 ns.communication.msgHandlers[prefixes.normal] = function(prefix, msg, channel, sender)
+  if channel ~= "GUILD" then return end -- only accept messages from guild chat for now
   if UnitIsUnit("player", sender) then return end
   local uncompressedData, compressedData = strsplit("@", msg, 2)
   local msgType, dbVersion, configVersion, isCbor, idType, id = uncompressedData:match("^(.)(...)(...)(.)(.)(.-)$")
@@ -71,6 +72,7 @@ ns.communication.msgHandlers[prefixes.normal] = function(prefix, msg, channel, s
       if idType == "T" and id ~= ns.me.droptimizerKey then return end -- targeted droptimizerData sync, but not for me, could probably just catch these in the future?
     end
     local dataString = private.prepString(compressedData, false)
+    if not dataString then return end
     local dataType = dataString:sub(1, 1)
     if ns.mapping.toRealData[dataType] then
       ns.mapping.toRealData[dataType](configVersion, dbVersion, dataString:sub(2), nil, id, channel)
@@ -98,6 +100,7 @@ ns.communication.msgHandlers[prefixes.normal] = function(prefix, msg, channel, s
   --end
   local fullGuid = ns.mapping.ConvertPartialGuidToGuid(id)
   local dataString = private.prepString(compressedData, false)
+  if not dataString then return end
   for _, dataStr in pairs({ strsplit("@", dataString) }) do
     local dataType = dataStr:sub(1, 1)
     if ns.mapping.toRealData[dataType] then
@@ -117,6 +120,7 @@ if ns.hasDataAddon then
     [7] = "weeklyRewardsUpdate",
   }
   ns.communication.msgHandlers[prefixes.updateChecker] = function(prefix, msg, channel, sender)
+    if channel ~= "GUILD" then return end -- only accept messages from guild chat for now
     if UnitIsUnit("player", sender) then return end
     local msgType, dbVersion, configVersion, isCbor, guidType, partialGuid, dataStr = msg:match("^(.)(...)(...)(.)(.)(.-)@(.*)$")
     ns.Debug.print("update check from: '%s'", partialGuid)
@@ -153,9 +157,9 @@ if ns.hasDataAddon then
 end
 private.queue = {}
 private.groupChannels = {
-  [ns.enums.chatChannels.instance] = true,
-  [ns.enums.chatChannels.party] = true,
-  [ns.enums.chatChannels.raid] = true,
+  --[ns.enums.chatChannels.instance] = true,
+  --[ns.enums.chatChannels.party] = true,
+  --[ns.enums.chatChannels.raid] = true,
 }
 function private.confimChannel(prefChannel)
   if prefChannel == ns.enums.chatChannels.guild then
@@ -181,28 +185,32 @@ end)
 
 function private.whitelistDataUpdateCheck()
   if ns.restrictedAddonMessages then return end -- unlike private.updateCheck, this actually takes resources to run, so skip checks during restrictions
-  for listId, charList in pairs(WowUtilsDB.syncLists) do
-    local slugToId = {}
-    local found = {}
-    for k,v in pairs(charList.characters) do -- TODO do this on data update, but good enough for now (beta)
-      slugToId[v] = k
-    end
-    local temp = {}
-    for guid, charData in pairs(WowUtilsDB.others) do -- TODO build slug to guid list somewhere thats kept up to date when new data is getting in (in theory slug can have multiple guids which makes it awkward)
-      if charData.droptimizerKey and slugToId[charData.droptimizerKey] then
-        found[slugToId[charData.droptimizerKey]] = true
-        table.insert(temp, {id = slugToId[charData.droptimizerKey], timestamp = ns.mapping.GetCharacterTimestampsForWideSync(charData)})
+  for listId in pairs(ns.eligibleSyncLists) do
+  --for listId, charList in pairs(WowUtilsDB.syncLists) do
+    local charList = WowUtilsDB.syncLists[listId]
+    if charList then
+      local slugToId = {}
+      local found = {}
+      for k,v in pairs(charList.characters) do -- TODO do this on data update, but good enough for now (beta)
+        slugToId[v] = k
       end
-    end
-    for k,v in pairs(slugToId) do
-      if not found[v] and not ns.database.ownSlugs[k] then
-        table.insert(temp, {id = v, timestamp = 0})
+      local temp = {}
+      for guid, charData in pairs(WowUtilsDB.others) do -- TODO build slug to guid list somewhere thats kept up to date when new data is getting in (in theory slug can have multiple guids which makes it awkward)
+        if charData.droptimizerKey and slugToId[charData.droptimizerKey] then
+          found[slugToId[charData.droptimizerKey]] = true
+          table.insert(temp, {id = slugToId[charData.droptimizerKey], timestamp = ns.mapping.GetCharacterTimestampsForWideSync(charData)})
+        end
       end
-    end
-    local str = ns.mapping.GetMsgData(ns.enums.context.whitelistCharSyncRequest, temp, nil, listId)
-    if str ~= "" then
-      ns.Debug.print("sending whitelistCharSyncRequest for list: '%s', total characters found: '%s'", listId, #temp)
-      private.sendAddonMessage(ns.enums.addonMessagesTypes.whitelistCharSyncRequest, str, ns.enums.chatChannels.guild, "NORMAL", nil, false)
+      for k,v in pairs(slugToId) do
+        if not found[v] and not ns.database.ownSlugs[k] then
+          table.insert(temp, {id = v, timestamp = 0})
+        end
+      end
+      local str = ns.mapping.GetMsgData(ns.enums.context.whitelistCharSyncRequest, temp, nil, listId)
+      if str ~= "" then
+        ns.Debug.print("sending whitelistCharSyncRequest for list: '%s', total characters found: '%s'", listId, #temp)
+        private.sendAddonMessage(ns.enums.addonMessagesTypes.whitelistCharSyncRequest, str, ns.enums.chatChannels.guild, "NORMAL", nil, false)
+      end
     end
   end
 end
@@ -250,8 +258,9 @@ function private.addVersionsToCompressedString(msgType, str, target, isCbor)
 end
 
 ---@param str string
----@param sending boolean
+---@param sending true
 ---@return string
+---@overload fun(str:string?, sending:false):string? -- nil when the payload could not be decoded (corrupted/incomplete transfer)
 function private.prepString(str, sending)
   if sending then
     local compressed = CompressString(str, Enum.CompressionMethod.Deflate, Enum.CompressionLevel.OptimizeForSize)
@@ -259,8 +268,20 @@ function private.prepString(str, sending)
     ns.Debug.print("Results: Uncompressed #%s - Compressed #%s - Encoded #%s", str:len(), compressed:len(), encoded:len())
     return encoded
   end
-  local compressed = DecodeBase64(str)
-  local decompressed = DecompressString(compressed, Enum.CompressionMethod.Deflate)
+  -- AceComm has no integrity check on reassembled multipart messages, so a dropped or interleaved
+  -- chunk lands here as garbage. decode defensively and drop the message instead of erroring out.
+  if type(str) ~= "string" or str == "" then return end
+  local ok, compressed = pcall(DecodeBase64, str)
+  if not ok or type(compressed) ~= "string" then
+    ns.Debug.print("failed to base64 decode incoming message (#%s)", str:len())
+    return
+  end
+  local decompressed
+  ok, decompressed = pcall(DecompressString, compressed, Enum.CompressionMethod.Deflate)
+  if not ok or type(decompressed) ~= "string" then
+    ns.Debug.print("failed to decompress incoming message (#%s)", str:len())
+    return
+  end
   ns.Debug.print("Results (D): Encoded #%s - Compressed #%s - Uncompressed #%s", str:len(), compressed:len(), decompressed:len())
   return decompressed
 end
@@ -320,9 +341,9 @@ do
   local lastSentTime = 0
   function ns.communication.SendInfoForLoot()
     if GetTime() - lastSentTime < 5 then return end
-    if not IsInGroup() then return end
+    if not IsInGroup() then return end -- even with guild sync only, we dont wanna send messages when we are not in a group
     ns.Debug.print("sending info for loot")
-    local currentGroupType = IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and "instance_chat" or IsInRaid() and "raid" or "party"
+    --local currentGroupType = IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and "instance_chat" or IsInRaid() and "raid" or "party"
     --if currentGroupType == "party" then return end -- ignore party at least for now
 
     local t = {}
@@ -330,7 +351,7 @@ do
     tinsert(t, ns.mapping.GetMsgData(ns.enums.context.craftingItems, charDB.craftingItems, charDB.craftingItemsUpdated))
     tinsert(t, ns.mapping.GetMsgData(ns.enums.context.watermarks, charDB.watermarks, charDB.watermarksUpdated))
     local str = tconcat(t, "@")
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.forLoot, str, currentGroupType, "NORMAL", nil, false)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.forLoot, str, ns.enums.chatChannels.guild, "NORMAL", nil, false)
     -- don't combine messages
     ns.communication.SendDroptimizerData()
     lastSentTime = GetTime()
@@ -340,6 +361,7 @@ do
   local lastSentTime = 0
   ---@param listId string
   function ns.communication.SendSyncList(listId)
+    if not ns.eligibleSyncLists[listId] then return end
     if not WowUtilsDB.syncLists[listId] then return end
     if GetTime() - lastSentTime < 5 then return end
     if not IsInGuild() then return end
@@ -382,6 +404,15 @@ do
     if GetTime() - lastSentTime < 1 then return end
     ns.Debug.print("sending watermarks")
     private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.watermarks, charDB.watermarks, charDB.watermarksUpdated), ns.enums.chatChannels.guild, "NORMAL", nil, false)
+    lastSentTime = GetTime()
+  end
+end
+do
+  local lastSentTime = 0
+  function ns.communication.SendBonusCoinUsageUpdate()
+    if GetTime() - lastSentTime < 1 then return end
+    ns.Debug.print("sending bonus coin usages")
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.bonusCoin, charDB.bonusCoinUsage, charDB.bonusCoinUsageUpdated), ns.enums.chatChannels.guild, "NORMAL", nil, false)
     lastSentTime = GetTime()
   end
 end
@@ -468,11 +499,11 @@ do
     local dataStr = ns.mapping.GetMsgData(ns.enums.context.droptimizerData, t)
     if not dataStr then return end
     local target = sformat("%s%s", key == "own" and "S" or "T", key == "own" and ns.me.droptimizerKey or key)
-    local channel = ns.enums.chatChannels.guild
-    if key == "own" then
-      channel = IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and "instance_chat" or IsInRaid() and "raid" or "party"
-    end
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.droptimizerData, dataStr, channel, "NORMAL", target, true)
+    --local channel = ns.enums.chatChannels.guild
+    --if key == "own" then
+      --channel = IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and "instance_chat" or IsInRaid() and "raid" or "party"
+    --end
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.droptimizerData, dataStr, ns.enums.chatChannels.guild, "NORMAL", target, true)
     cache[key] = GetTime()
   end
 end

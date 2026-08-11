@@ -1,8 +1,8 @@
-## Interface: 120007
+## Interface: 120007, 120100
 ## Title: WowUtils
 ## Notes: WowUtils data caching
 ## Author: Ironi
-## Version: 0.0.7beta
+## Version: 0.0.8beta
 ## IconTexture: Interface\AddOns\wowutils\media\logo.png
 ## DefaultState: enabled
 ## LoadSavedVariablesFirst: 1

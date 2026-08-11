@@ -35,7 +35,7 @@ local currentUsage = {
   fullSynclist = "L",
   generalUpdateCheck = "M",
   syncListRequest = "N",
-  --["O"] = nil,
+  bonusCoinUsage = "O",
   --["P"] = nil,
   --["Q"] = nil,
   --["R"] = nil,
@@ -83,11 +83,35 @@ local currentUsage = {
   --["8"] = nil,
   --["9"] = nil,
 }
-
+local function updateRefreshTimeIfNeededForFullSync(currentData, incomingData, dataType, isNewer)
+  if not currentData.dataRefreshTimes then
+    currentData.dataRefreshTimes = {}
+  end
+  if not currentData.dataRefreshTimes[dataType] then
+    currentData.dataRefreshTimes[dataType] = 0
+  end
+  if not (incomingData.dataRefreshTimes and incomingData.dataRefreshTimes[dataType]) then return end -- tecnically there might be some weird cases at start, but that doesn't really matter since its only when updating from old (0.0.7b) version to newer
+  if isNewer then
+    currentData.dataRefreshTimes[dataType] = incomingData.dataRefreshTimes[dataType]
+    return
+  end
+  if incomingData.dataRefreshTimes[dataType] <= currentData.dataRefreshTimes[dataType] then return end
+  currentData.dataRefreshTimes[dataType] = incomingData.dataRefreshTimes[dataType]
+end
+local fullSyncChecks = {
+  currency = {updateKey = "currencyUpdated", refreshKey = "currency"},
+  watermarks = {updateKey = "watermarksUpdated", refreshKey = "watermarks"},
+  craftingItems = {updateKey = "craftingItemsUpdated", refreshKey = "watermarks"},
+  quests = {updateKey = "questsUpdated", refreshKey = "quests"},
+  vaultData = {updateKey = "vaultDataLastUpdate", refreshKey = "vaultData"},
+  weeklyRewards = {updateKey = "weeklyRewardsUpdate", refreshKey = "weeklyRewards"},
+  bonusCoinUsage = {updateKey = "bonusCoinUsageUpdated", refreshKey = "bonusCoinUsage"},
+}
 ---@class wowutils_mapping
 ---@field toRealData table<string, wowutils_mapping_toRealDataFunc>
 ---@field ConvertGuidToMsgFormat fun(guid:string):string
 ---@field ConvertPartialGuidToGuid fun(partialGuid:string):string
+---@field SafeDeserializeCBOR fun(cborStr:string?):table?
 ns.mapping = {
   toRealData = {
     [currentUsage.watermarks] = function(configVersion, dbVersion, str, db, targetGuid, channel) -- A
@@ -101,6 +125,9 @@ ns.mapping = {
       timestamp = ns.mapping.timestamp.FromValue(timestamp)
       if db and db.watermarksUpdated then
         if db.watermarksUpdated >= timestamp then
+          if db.watermarksUpdated == timestamp then
+            ns.database.DataRefreshed(ns.enums.context.watermarks, db)
+          end
           ns.Debug.print("already has newer data")
           return
         end                                                                                           -- Current data is newer, discard
@@ -112,6 +139,7 @@ ns.mapping = {
         local offset = ns.mapping.int.FromValue(_mult) * ns.config.watermarks.multiplier + ns.mapping.int.FromValue(_rem)
         converted[ns.mapping.int.FromValue(_slot)] = offset > 0 and (offset + ns.config.watermarks.startingPoint) or 0
       end
+      ns.database.DataRefreshed(ns.enums.context.watermarks, db)
       db.watermarksUpdated = timestamp
       db.watermarks = converted
       db.lastUpdateReceived = GetServerTime()
@@ -128,7 +156,12 @@ ns.mapping = {
       ns.Debug.print("receiving currency for '%s'", targetGuid)
       local timestamp, currencyStr = str:match("^(%d+)%?(.*)$")
       timestamp = ns.mapping.timestamp.FromValue(timestamp)
-      if db.currencyUpdated >= timestamp then return end -- Current data is newer, discard
+      if db.currencyUpdated >= timestamp then  -- Current data is newer, discard
+        if db.currencyUpdated == timestamp then
+          ns.database.DataRefreshed(ns.enums.context.currency, db)
+        end
+        return
+      end
       local splits = { strsplit("^", currencyStr) }
       for _, v in pairs(splits) do
         local _currencyMapId, _current, _total = v:match("^(.)(%d+)%?(%d+)$")
@@ -154,6 +187,7 @@ ns.mapping = {
           end
         end
       end
+      ns.database.DataRefreshed(ns.enums.context.currency, db)
       db.currencyUpdated = timestamp
       db.lastUpdateReceived = GetServerTime()
     end,
@@ -166,7 +200,13 @@ ns.mapping = {
       ns.Debug.print("receiving crafting items for '%s'", targetGuid)
       local timestamp, itemCount = str:match("^(.-)%?(.+)$")
       timestamp = ns.mapping.timestamp.FromValue(timestamp)
-      if db.craftingItemsUpdated >= timestamp then return end -- Current data is newer, discard
+      if db.craftingItemsUpdated >= timestamp then -- Current data is newer, discard
+        if db.craftingItemsUpdated == timestamp then
+          ns.database.DataRefreshed(ns.enums.context.craftingItems, db)
+        end
+        return
+      end
+      ns.database.DataRefreshed(ns.enums.context.craftingItems, db)
       db.craftingItems = ns.mapping.int.FromValue(itemCount)
       db.craftingItemsUpdated = timestamp
       db.lastUpdateReceived = GetServerTime()
@@ -190,7 +230,9 @@ ns.mapping = {
       if not timestamp then return end
       ns.Debug.print("receiving droptimizer data for '%s'", key)
       if WowUtilsDB.droptimizerData[key] and WowUtilsDB.droptimizerData[key].lastUpdate >= timestamp then return end -- already have newer data
-      WowUtilsDB.droptimizerData[key] = DeserializeCBOR(cborStr)
+      local t = ns.mapping.SafeDeserializeCBOR(cborStr)
+      if not t then return end
+      WowUtilsDB.droptimizerData[key] = t
     end,
     [currentUsage.fullCharacterSync] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- F
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
@@ -204,8 +246,10 @@ ns.mapping = {
       ns.Debug.print("receiving full character sync for '%s'", targetGuid)
       if WowUtilsDB.others[targetGuid] and WowUtilsDB.others[targetGuid].lastUpdate >= timestamp then return end -- already have newer data
       -- might as well update since someone is sending it
-      WowUtilsDB.others[targetGuid] = DeserializeCBOR(cborStr)
-      WowUtilsDB.others[targetGuid].lastUpdateReceived = GetServerTime()
+      local t = ns.mapping.SafeDeserializeCBOR(cborStr)
+      if not t then return end
+      WowUtilsDB.others[targetGuid] = t
+      t.lastUpdateReceived = GetServerTime()
     end,
     [currentUsage.vaultData] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- G
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
@@ -221,10 +265,18 @@ ns.mapping = {
       timestamp = tonumber(timestamp)
       if not timestamp then return end
       ns.Debug.print("receiving vault data update for '%s'", targetGuid)
-      if db and (db.vaultDataLastUpdate or 0) >= timestamp then return end -- already have newer data
+      if db and (db.vaultDataLastUpdate or 0) >= timestamp then -- already have newer data
+        if db and db.vaultDataLastUpdate == timestamp then
+          ns.database.DataRefreshed(ns.enums.context.vaultData, db)
+        end
+        return
+      end
       -- might as well update since someone is sending it
+      local t = ns.mapping.SafeDeserializeCBOR(cborStr)
+      if not t then return end
+      ns.database.DataRefreshed(ns.enums.context.vaultData, db)
       db.vaultDataLastUpdate = timestamp
-      db.vaultData = DeserializeCBOR(cborStr)
+      db.vaultData = t
       db.lastUpdateReceived = GetServerTime()
     end,
     [currentUsage.weeklyRewards] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- H
@@ -241,10 +293,18 @@ ns.mapping = {
       timestamp = tonumber(timestamp)
       if not timestamp then return end
       ns.Debug.print("receiving weekly rewards data update for '%s'", targetGuid)
-      if (db.weeklyRewardsUpdate or 0) >= timestamp then return end -- already have newer data
+      if (db.weeklyRewardsUpdate or 0) >= timestamp then -- already have newer data
+        if db.weeklyRewards == timestamp then
+          ns.database.DataRefreshed(ns.enums.context.weeklyRewards, db)
+        end
+        return
+      end
       -- might as well update since someone is sending it
+      local t = ns.mapping.SafeDeserializeCBOR(cborStr)
+      if not t then return end
+      ns.database.DataRefreshed(ns.enums.context.weeklyRewards, db)
       db.weeklyRewardsUpdate = timestamp
-      db.weeklyRewards = DeserializeCBOR(cborStr)
+      db.weeklyRewards = t
       db.lastUpdateReceived = GetServerTime()
     end,
     [currentUsage.quests] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- I
@@ -257,9 +317,11 @@ ns.mapping = {
       local timestamp, questDataStr = str:match("^(%d+)%?(.*)$")
       timestamp = ns.mapping.timestamp.FromValue(timestamp)
       if not timestamp then return end
-      if db.questsUpdated >= timestamp then return end -- we already have newer data, discard
+      if db.questsUpdated >= timestamp then -- we already have newer data, discard
+        ns.database.DataRefreshed(ns.enums.context.quests, db)
+        return
+      end
       ns.Debug.print("receiving quest update for '%s'", targetGuid)
-
       for _, v in pairs({ strsplit("^", questDataStr) }) do
         local completed, completedWarbound, questId = v:match("^(.)(.)(.*)$")
         questId = tonumber(questId)
@@ -271,6 +333,7 @@ ns.mapping = {
           }
         end
       end
+      ns.database.DataRefreshed(ns.enums.context.quests, db)
       db.questsUpdated = timestamp
       db.lastUpdateReceived = GetServerTime()
     end,
@@ -348,38 +411,24 @@ ns.mapping = {
           return
         end
       end
-      local t = DeserializeCBOR(cborStr)
+      local t = ns.mapping.SafeDeserializeCBOR(cborStr)
+      if not t then return end
       ---@cast t wowutils_otherChar
       if not c then
         WowUtilsDB.others[targetGuid] = t
-        WowUtilsDB.others[targetGuid].lastUpdateReceived = GetServerTime()
+        t.lastUpdateReceived = GetServerTime()
         return
       end
       local updated = false
       -- only catch whats new, just in case
-      if t.currencyUpdated > c.currencyUpdated then
-        updated = true
-        c.currency = t.currency
-      end
-      if t.watermarksUpdated > c.watermarksUpdated then
-        updated = true
-        c.watermarks = t.watermarks
-      end
-      if t.craftingItemsUpdated > c.craftingItemsUpdated then
-        updated = true
-        c.craftingItems = t.craftingItems
-      end
-      if t.questsUpdated > c.questsUpdated then
-        updated = true
-        c.quests = t.quests
-      end
-      if t.vaultDataLastUpdate > c.vaultDataLastUpdate then
-        updated = true
-        c.vaultData = t.vaultData
-      end
-      if t.weeklyRewardsUpdate > c.weeklyRewardsUpdate then
-        updated = true
-        c.weeklyRewards = t.weeklyRewards
+      for dataKey,v in pairs(fullSyncChecks) do
+        if (t[v.updateKey] or 0) > (c[v.updateKey] or 0) then
+          updated = true
+          c[dataKey] = t[dataKey]
+          updateRefreshTimeIfNeededForFullSync(c, t, v.refreshKey, true)
+        elseif t[v.updateKey] and t[v.updateKey] > 0 and t[v.updateKey] == (c[v.updateKey] or 0) then
+          updateRefreshTimeIfNeededForFullSync(c, t, v.refreshKey, false)
+        end
       end
       if not updated then return end
       c.lastUpdateReceived = GetServerTime()
@@ -397,9 +446,11 @@ ns.mapping = {
         ns.Debug.print("already have newer data from synclist '%s'", listId)
         return
       end
-      local t = DeserializeCBOR(cborStr)
+      local t = ns.mapping.SafeDeserializeCBOR(cborStr)
+      if not t then return end
       ---@cast t wowutilsSyncList
       WowUtilsDB.syncLists[listId] = t
+      ns.database.CheckEligibleSyncLists()
       ns.Debug.print("Updated syncList '%s' - from '%s'", listId, partialGuid)
     end,
     --[[
@@ -431,8 +482,35 @@ ns.mapping = {
       if not (listId and timestamp) then return end
       if not WowUtilsDB.syncLists[listId] or WowUtilsDB.syncLists[listId].lastUpdate <= timestamp then return end
       ns.communication.SendSyncList(listId)
-    end
-    --["O"] = nil,
+    end,
+    [currentUsage.bonusCoinUsage] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- O
+      if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
+      local targetGuid = ns.mapping.ConvertPartialGuidToGuid(partialGuid)
+      if not db then
+        db = confirmAndReturnDBForChar(targetGuid, channel)
+        if not db then return end
+      end
+      local timestampLength = str:byte(1)
+      local timestamp = str:sub(2, 1 + timestampLength)
+      local cborStr = str:sub(2 + timestampLength)
+      ---@diagnostic disable-next-line: cast-local-type
+      timestamp = tonumber(timestamp)
+      if not timestamp then return end
+      ns.Debug.print("receiving bonus coin usage update for '%s'", targetGuid)
+      if db and (db.bonusCoinUsageUpdated or 0) >= timestamp then -- already have newer data
+        if db and db.bonusCoinUsageUpdated == timestamp then
+          ns.database.DataRefreshed(ns.enums.context.bonusCoin, db)
+        end
+        return
+      end
+      -- might as well update since someone is sending it
+      local t = ns.mapping.SafeDeserializeCBOR(cborStr)
+      if not t then return end
+      ns.database.DataRefreshed(ns.enums.context.bonusCoin, db)
+      db.bonusCoinUsageUpdated = timestamp
+      db.bonusCoinUsage = t
+      db.lastUpdateReceived = GetServerTime()
+    end,
     --["P"] = nil,
     --["Q"] = nil,
     --["R"] = nil,
@@ -481,6 +559,21 @@ ns.mapping = {
     --["9"] = nil,
   },
 }
+
+-- incoming payloads can arrive corrupted (AceComm has no integrity check, so a dropped or interleaved
+-- multipart chunk still gets reassembled and fired at us). never let that throw, just drop the message.
+---@param cborStr string?
+---@return table?
+function ns.mapping.SafeDeserializeCBOR(cborStr)
+  if type(cborStr) ~= "string" or cborStr == "" then return end
+  local ok, t = pcall(DeserializeCBOR, cborStr)
+  if not ok or type(t) ~= "table" then
+    ns.Debug.print("corrupted cbor payload (#%s bytes), dropping message", #cborStr)
+    return
+  end
+  return t
+end
+
 local numberConverts = {
   fromInt = {
     [0] = "0",
@@ -762,6 +855,10 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
   end
   if context == ns.enums.context.syncListRequest then
     return sformat("%s%s?%s", currentUsage.syncListRequest, data, timestamp)
+  end
+  if context == ns.enums.context.bonusCoin then
+    local lastUpdate = tostring(timestamp or 0)
+    return sformat("%s%s?%s", currentUsage.bonusCoinUsage, string.char(#lastUpdate), lastUpdate, SerializeCBOR(data))
   end
   geterrorhandler()("Unknown context: " .. tostring(context))
   return ""

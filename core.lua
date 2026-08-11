@@ -1,35 +1,9 @@
 ---@class wowutilsPrivate : table
----@field PrintDebug fun(str: string, ...: any)
 ---@field GreatVaultUpdate fun(...)
 ---@field CheckQuests fun(...)
----@field Debug wowutilsDebug
 
 ---@type string, wowutilsPrivate
 local addon_name, ns = ...
-
----@class wowutilsDebug
----@field print fun(formatStr:string, ...:any)
----@field AddToDevTool fun(data:any, displayName:string?)
-ns.Debug = {}
-
-function ns.Debug.print(str, ...)
-  if not ns.debugMode then return end
-  local args = { ... }
-  for k, v in ipairs(args) do
-    args[k] = tostring(v)
-  end
-  local success, error = pcall(function()
-    print(string.format("%s WowUtilsDebug - %s", GetTime(), (#args > 0 and str:format(unpack(args))) or str))
-    return true
-  end)
-  if success then return end
-  print("Error from PrintDebug:", error, "str :", str)
-end
-function ns.Debug.AddToDevTool(data, displayName)
-  if not ns.debugMode then return end
-  if not DevTool then return end
-  DevTool:AddData(data, displayName)
-end
 
 do -- Weekly vault rewards
   local alreadyHookedWeeklyRewards = false

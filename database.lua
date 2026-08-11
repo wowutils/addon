@@ -1,8 +1,10 @@
 ---@class wowutilsPrivate
 ---@field database wowutils_database
+---@field eligibleSyncLists table<string, boolean>
 
 ---@type string, wowutilsPrivate
 local addon_name, ns = ...
+ns.eligibleSyncLists = {}
 local GetServerTime, sformat = GetServerTime, string.format
 ---@class wowutilsSavedVariables
 ---@field lastCharacter wowutils_lastChar
@@ -14,6 +16,7 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@field lastSeenWeeklyReset number
 ---@field lastDataImport number?
 ---@field syncLists table<string, wowutilsSyncList>
+---@field configVersion number
 
 ---@class wowutilsSyncList
 ---@field lastUpdate number
@@ -46,6 +49,7 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@field items table<number, wowutils_itemData>
 ---@field watermarks table<number, number> -- slot = ilvl
 ---@field watermarksUpdated number
+---@field dataRefreshTimes table<string, number>
 ---@field lastUpdate number
 ---@field lastUpdateReceived number
 ---@field craftingItems number
@@ -63,6 +67,17 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@field weeklyRewards table<string, number> -- "type-index" = level
 ---@field weeklyRewardsUpdate number
 ---@field droptimizerKey string
+---@field bonusCoinUsage wowutils_bonusCoinUsage[]
+---@field bonusCoinUsageUpdated number
+
+---@class wowutils_bonusCoinUsage
+---@field difId number
+---@field itemLink string
+---@field encounterId number
+---@field receiveTime number
+---@field specId number
+---@field season number
+---@field instanceId number
 
 ---@class wowutils_characterInformationForMapping
 ---@field guid string
@@ -177,10 +192,32 @@ end
 ---@class wowutils_database
 ns.database = {}
 ns.database.ownSlugs = {}
+local clearOldConfigData = (db.configVersion or 0) < ns.config.configVersion
 for k,v in pairs(WowUtilsDB.ownCharacters) do
   ns.database.ownSlugs[v.droptimizerKey] = true
+  if clearOldConfigData then
+    local toDelete = {}
+    for currencyId in pairs(v.currency) do
+      if not ns.config.currencies[currencyId] then
+        toDelete[currencyId] = true
+      end
+    end
+    for del in pairs(toDelete) do
+      v.currency[del] = nil
+    end
+    wipe(toDelete)
+    for questId in pairs(v.quests) do
+      if not ns.config.quests[questId] then
+        toDelete[questId] = true
+      end
+    end
+    for del in pairs(toDelete) do
+      v.quests[del] = nil
+    end
+    v.craftingItems = 0
+  end
 end
-
+db.configVersion = ns.config.configVersion
 local function contextUpdated(context)
   local serverTime = GetServerTime()
   if context == ns.enums.context.currency then
@@ -201,14 +238,45 @@ local function contextUpdated(context)
   elseif context == ns.enums.context.quests then
     charDB.questsUpdated = serverTime
     ns.communication.SendQuestUpdate()
+  elseif context == ns.enums.context.bonusCoin then
+    charDB.bonusCoinUsageUpdated = serverTime
+    ns.communication.SendBonusCoinUsageUpdate()
   end
   charDB.lastUpdate = serverTime
 end
 
+---@param context wowutils_enums_context
+---@param db wowutils_otherChar|wowutils_ownChar
+function ns.database.DataRefreshed(context, db)
+  if not (context and db) then
+    ns.Debug.print("Trying to call ns.database.DataRefreshed with incorrect data - context '%s', db '%s'", tostring(context), tostring(db))
+    return
+  end
+  local _type
+  if context == ns.enums.context.currency then
+    _type = "currency"
+  elseif context == ns.enums.context.watermarks then
+    _type = "watermarks"
+  elseif context == ns.enums.context.craftingItems then
+    _type = "craftingItems"
+  elseif context == ns.enums.context.vaultData then
+    _type = "vaultData"
+  elseif context == ns.enums.context.weeklyRewards then
+    _type = "weeklyRewards"
+  elseif context == ns.enums.context.quests then
+    _type = "quests"
+  end
+  if not _type then return end
+  if not db.dataRefreshTimes then
+    db.dataRefreshTimes = {}
+  end
+  db.dataRefreshTimes[_type] = GetServerTime()
+end
 ---@param context string
 ---@param id string|number?
 ---@param data any
 function ns.database.SaveToCurrentCharacterDB(context, id, data)
+  ns.database.DataRefreshed(context, charDB)
   if context == ns.enums.context.currency then
     ---@cast id number
     if not charDB.currency[id] then
@@ -334,6 +402,15 @@ function ns.database.SaveToCurrentCharacterDB(context, id, data)
     end
     return
   end
+  if context == ns.enums.context.bonusCoin then
+    ---@cast data wowutils_bonusCoinUsage
+    if not charDB.bonusCoinUsage then
+      charDB.bonusCoinUsage = {}
+    end
+    tinsert(charDB.bonusCoinUsage, data)
+    contextUpdated(context)
+    return
+  end
   geterrorhandler()("Unknown context: " .. tostring(context))
 end
 
@@ -344,7 +421,22 @@ end
 function ns.database.GetAllCharsDB()
   return db.others
 end
-
+function ns.database.CheckEligibleSyncLists()
+  wipe(ns.eligibleSyncLists)
+  for listId, charList in pairs(WowUtilsDB.syncLists) do
+    local counter = 0
+    for k,v in pairs(charList.characters) do
+      if ns.currentGuildSlugs[v] then
+        counter = counter + 1
+      end
+      if counter >= 5 then -- require at least 5 members of the SyncList to be in the guild before syncing
+        ns.eligibleSyncLists[listId] = true
+        ns.Debug.print("Setting '%s' to eligible list", listId)
+        break
+      end
+    end
+  end
+end
 function ns.database.ResetWeeklyData(currentResetStart)
   charDB.lastWeeklyReset = currentResetStart
   for guid, charData in pairs(db.ownCharacters) do
@@ -376,6 +468,18 @@ do
   end
   for k,v in pairs(toDelete) do
     WowUtilsDB.others[k] = nil
+  end
+  C_MythicPlus.RequestMapInfo()
+  local currentSeason = C_MythicPlus.GetCurrentSeason()
+  ns.Debug.print("Current M+ season: %s", currentSeason)
+  for k,v in pairs(WowUtilsDB.ownCharacters) do
+    if v.bonusCoinUsage then
+      for i = 1, #v.bonusCoinUsage, -1 do
+        if v.bonusCoinUsage[i].season < currentSeason then
+          tremove(v.bonusCoinUsage, i)
+        end
+      end
+    end
   end
 end
 --#end region
