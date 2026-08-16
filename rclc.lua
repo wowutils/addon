@@ -85,7 +85,7 @@ do
       itemId = itemId,
       itemClassId = _item.typeID,
       itemSubClassId = _item.subTypeID,
-      invSlotId = _item.equipLoc,
+      invSlotId = ns.helpers.GetInventorySlotByEquipLoc(_item.equipLoc),
       watermarkSlot = C_ItemUpgrade.GetHighWatermarkSlotForItem(_item.link)
     }
     return itemLinkDataCache[_item.link]
@@ -186,7 +186,7 @@ do
       tooltip:AddDoubleLine(sformat("|T%d:0|t%s", itemIcon, itemName),
         ns.helpers.GetFormatedLastUpdateTime(wlItem.updated), 1, 1, 1)
     end
-    tooltip:AddLine(sformat("    Priotity: %s - Note: %s", wlItem.priority, wlItem.note or "N/A"), 1, 1, 1, true)
+    tooltip:AddLine(sformat("    Priority: %s - Note: %s", wlItem.priority, wlItem.note or "N/A"), 1, 1, 1, true)
   end
   do
     local qeLiveMatchStr = "0%-1$"
@@ -339,7 +339,7 @@ do
         tooltip:AddLine(unpack(formatCurrencyLine("bonusCoin", playerData.currency)))
       end
       if itemInfo.watermarkSlot then
-        tooltip:AddDoubleLine("Free updagre up to:", ns.helpers.GetFormatedLastUpdateTime(playerData.dataRefreshTimes and playerData.dataRefreshTimes.watermarks or playerData.watermarksUpdated or 0))
+        tooltip:AddDoubleLine("Free upgrade up to:", ns.helpers.GetFormatedLastUpdateTime(playerData.dataRefreshTimes and playerData.dataRefreshTimes.watermarks or playerData.watermarksUpdated or 0))
         if playerData.watermarks then
           if weaponSlots[itemInfo.watermarkSlot] then
             tooltip:AddLine(
