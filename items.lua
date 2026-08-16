@@ -36,7 +36,7 @@ end
 function ns.items.CacheBonusRollResult(typeIdentifier, itemLink, quantity, specID, sex, personalLootToast, currencyID, isSecondaryResult, corrupted)
   ns.Debug.print("Bonus coin used")
   if ns.currency.lastBonusCoinUsed + 1 <= GetTime() then return end -- not actual bonus coin
-  local hasValidCacheData = (cachedPopup.expirationTime or 0) + 5 > GetTime() and (cachedPopup.startTime) > GetTime()
+  local hasValidCacheData = (cachedPopup.expirationTime or 0) + 5 > GetTime()
   ns.Debug.print("Saving bonus coin - hasValidCacheData '%s'", hasValidCacheData)
   ns.database.SaveToCurrentCharacterDB(ns.enums.context.bonusCoin, nil, {
     difId = hasValidCacheData and cachedPopup.difId or 0,

@@ -314,6 +314,11 @@ local function getColoredBoolean(val)
   return tostring(val)
 end
 
+-- characters synced from older addon versions can lack whole data tables
+local function safeTable(t)
+  return type(t) == "table" and t or {}
+end
+
 local watermarkNameCache = {}
 for name, value in pairs(Enum.ItemRedundancySlot) do
   watermarkNameCache[value] = name
@@ -336,13 +341,13 @@ local function BuildDetailTextForCharacter(char)
   if type(char.vaultData) ~= "table" or not next(char.vaultData) then
     tinsert(lines, pad("none"))
   end
-  for _, vaultData in ipairs(char.vaultData) do
+  for _, vaultData in ipairs(safeTable(char.vaultData)) do
     ---@cast vaultData wowutils_vaultData_items
-    tinsert(lines, pad(sformat("%s (%s)%s", vaultData.itemId == 1 and "Currency" or vaultData.itemLink or UNKNOWN, vaultData.itemLevel > 0 and vaultData.itemLevel or "?", vaultData.picked and " |cff00ff00Picked|r" or "")))
+    tinsert(lines, pad(sformat("%s (%s)%s", vaultData.itemId == 1 and "Currency" or vaultData.itemLink or UNKNOWN, (vaultData.itemLevel or 0) > 0 and vaultData.itemLevel or "?", vaultData.picked and " |cff00ff00Picked|r" or "")))
   end
   tinsert(lines, "Weekly Rewards " .. ns.helpers.GetFormatedLastUpdateTime(char.weeklyRewardsUpdate))
   local weeklyRewardsFound = false
-  for k,v in pairs(char.weeklyRewards) do
+  for k,v in pairs(safeTable(char.weeklyRewards)) do
     weeklyRewardsFound = true
     tinsert(lines, pad(sformat("%s : %s", k, v)))
   end
@@ -351,7 +356,7 @@ local function BuildDetailTextForCharacter(char)
   end
   tinsert(lines, "Currency " .. ns.helpers.GetFormatedLastUpdateTime(char.currencyUpdated))
   local currencyFound =  false
-  for currencyId, currencyData in pairs(char.currency) do
+  for currencyId, currencyData in pairs(safeTable(char.currency)) do
     currencyFound = true
     local current = currencyData and currencyData.current or "-"
     local totalEarned = currencyData and currencyData.totalEarned or "-"
@@ -363,7 +368,7 @@ local function BuildDetailTextForCharacter(char)
   end
 
   tinsert(lines, "Quests " .. ns.helpers.GetFormatedLastUpdateTime(char.questsUpdated))
-  for questId, questData in pairs(char.quests) do
+  for questId, questData in pairs(safeTable(char.quests)) do
     local questName = C_QuestLog.GetTitleForQuestID(questId) or questId
     tinsert(lines, pad(sformat("|Hquest:%s:90|h%s|h (%s)", questId, questName, questId)))
     tinsert(lines, pad(sformat("completed: %s", getColoredBoolean(questData.completed)), 2))
@@ -374,7 +379,7 @@ local function BuildDetailTextForCharacter(char)
   end
   tinsert(lines, "Free updagre up to " .. ns.helpers.GetFormatedLastUpdateTime(char.watermarksUpdated))
   local watermarksFound = false
-  for slotId, ilvl in pairs(char.watermarks) do
+  for slotId, ilvl in pairs(safeTable(char.watermarks)) do
     watermarksFound = true
     local slotName = watermarkNameCache[slotId]
     tinsert(lines, pad(sformat("%s: %s", slotName, ilvl)))

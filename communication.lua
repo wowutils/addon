@@ -412,7 +412,7 @@ do
   function ns.communication.SendBonusCoinUsageUpdate()
     if GetTime() - lastSentTime < 1 then return end
     ns.Debug.print("sending bonus coin usages")
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.bonusCoin, charDB.bonusCoinUsage, charDB.bonusCoinUsageUpdated), ns.enums.chatChannels.guild, "NORMAL", nil, false)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.bonusCoin, charDB.bonusCoinUsage, charDB.bonusCoinUsageUpdated), ns.enums.chatChannels.guild, "NORMAL", nil, true)
     lastSentTime = GetTime()
   end
 end

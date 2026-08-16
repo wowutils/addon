@@ -44,7 +44,7 @@ function ns.events.PLAYER_LOGIN(...)
   if not C_AddOns.IsAddOnLoaded("Blizzard_WeeklyRewards") then
     C_AddOns.LoadAddOn("Blizzard_WeeklyRewards")
   end
-  ns.database.SaveToCurrentCharacterDB(ns.enums.context.serverSlugUpdate, ns.me.serverSlug)
+  ns.database.SaveToCurrentCharacterDB(ns.enums.context.serverSlugUpdate, nil, ns.me.serverSlug)
 end
 
 ns.events.eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")

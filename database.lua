@@ -191,9 +191,11 @@ end
 local charDB = WowUtilsDB.ownCharacters[ns.me.guid]
 local db = WowUtilsDB
 db.lastCharacter.guid = ns.me.guid
+db.lastCharacter.region = ns.me.regionId
 if db.dbVersion < ns.config.currentDBVersion then
   -- upgrade db based on version
 end
+-- TODO clean old droptimizers...somehow
 
 ---@class wowutils_database
 ns.database = {}
@@ -480,11 +482,13 @@ do
   C_MythicPlus.RequestMapInfo()
   local currentSeason = C_MythicPlus.GetCurrentSeason()
   ns.Debug.print("Current M+ season: %s", currentSeason)
-  for k,v in pairs(WowUtilsDB.ownCharacters) do
-    if v.bonusCoinUsage then
-      for i = 1, #v.bonusCoinUsage, -1 do
-        if v.bonusCoinUsage[i].season < currentSeason then
-          tremove(v.bonusCoinUsage, i)
+  if currentSeason and currentSeason > 0 then -- returns -1 until the RequestMapInfo response arrives
+    for k,v in pairs(WowUtilsDB.ownCharacters) do
+      if v.bonusCoinUsage then
+        for i = #v.bonusCoinUsage, 1, -1 do
+          if v.bonusCoinUsage[i].season < currentSeason then
+            tremove(v.bonusCoinUsage, i)
+          end
         end
       end
     end

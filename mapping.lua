@@ -101,7 +101,7 @@ end
 local fullSyncChecks = {
   currency = {updateKey = "currencyUpdated", refreshKey = "currency"},
   watermarks = {updateKey = "watermarksUpdated", refreshKey = "watermarks"},
-  craftingItems = {updateKey = "craftingItemsUpdated", refreshKey = "watermarks"},
+  craftingItems = {updateKey = "craftingItemsUpdated", refreshKey = "craftingItems"},
   quests = {updateKey = "questsUpdated", refreshKey = "quests"},
   vaultData = {updateKey = "vaultDataLastUpdate", refreshKey = "vaultData"},
   weeklyRewards = {updateKey = "weeklyRewardsUpdate", refreshKey = "weeklyRewards"},
@@ -294,7 +294,7 @@ ns.mapping = {
       if not timestamp then return end
       ns.Debug.print("receiving weekly rewards data update for '%s'", targetGuid)
       if (db.weeklyRewardsUpdate or 0) >= timestamp then -- already have newer data
-        if db.weeklyRewards == timestamp then
+        if db.weeklyRewardsUpdate == timestamp then
           ns.database.DataRefreshed(ns.enums.context.weeklyRewards, db)
         end
         return
@@ -848,7 +848,7 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
   end
   if context == ns.enums.context.bonusCoin then
     local lastUpdate = tostring(timestamp or 0)
-    return sformat("%s%s?%s", currentUsage.bonusCoinUsage, string.char(#lastUpdate), lastUpdate, SerializeCBOR(data))
+    return sformat("%s%s%s%s", currentUsage.bonusCoinUsage, string.char(#lastUpdate), lastUpdate, SerializeCBOR(data))
   end
   geterrorhandler()("Unknown context: " .. tostring(context))
   return ""

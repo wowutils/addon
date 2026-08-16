@@ -1645,7 +1645,7 @@ function ns.GetRealmSlug(region, realm)
   region = region or ns.me.regionId
   if type(realm) == "string" then
     realm = realm:lower():gsub("[^a-z0-9]", "")
-    return RealmSlugs[region].byLookupKey[realm].slug or "UNKNOWN"
+    return RealmSlugs[region].byLookupKey[realm] and RealmSlugs[region].byLookupKey[realm].slug or "UNKNOWN"
   end
   realm = tonumber(realm)
   return realm and realmIdToSlugs[realm] or "UNKNOWN"
