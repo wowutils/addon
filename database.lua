@@ -472,7 +472,7 @@ do
   --local droptimizerKeepTime = GetServerTime() - 30*24*60*60 -- 30 days
   local toDelete = {}
   for k,v in pairs(WowUtilsDB.others) do
-    if v.lastUpdateReceived < characterKeepThreshold then
+    if (v.lastUpdateReceived or 0) < characterKeepThreshold then
       toDelete[k] = true
     end
   end

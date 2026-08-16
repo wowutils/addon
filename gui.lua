@@ -252,7 +252,7 @@ local function GetCharacterList()
       kind = "character",
       data = data,
       name = data.fullSlug or UNKNOWN,
-      update = data.lastUpdateReceived or data.lastUpdate or 0,
+      update = data.lastUpdate or data.lastUpdateReceived or 0,
       class = data.class,
       syncLists = droptimizerKeysToSynclist[data.droptimizerKey]
     })
