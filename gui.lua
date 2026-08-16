@@ -7,49 +7,117 @@ local addon_name, ns = ...
 local GetServerTime, sformat, floor, srep = GetServerTime, string.format, math.floor, string.rep
 
 local FRAME_WIDTH, FRAME_HEIGHT = 760, 520
-local ROW_HEIGHT = 28
+local ROW_HEIGHT = 30
+local ROW_SPACING = 2
+local HEADER_HEIGHT = 46
 
 local COLORS = {
-  bg = {0.07, 0.07, 0.09, .9},
-  bgSolid = { 0.07, 0.07, 0.09, 1 },
-  panel = { 0.13, 0.13, 0.16, 0.97 },
-  border = { 0.28, 0.32, 0.42, 0.95 },
-  accent = {0.09, 0.2, 0.12, 1},
-  accentSoft = { 0.28, 0.38, 0.48, 0.55 },
-  text = { 0.94, 0.95, 0.97, 1.0 },
-  muted = { 0.72, 0.76, 0.82, 1.0 },
-  rowAlt = { 0.17, 0.17, 0.20, 0.70 },
-  hover = { 0.22, 0.30, 0.40, 0.40 },
-  active = { 0.20, 0.28, 0.40, 0.95 },
+  window      = { 0.06, 0.06, 0.08, 0.97 },
+  windowSolid = { 0.06, 0.06, 0.08, 1 },
+  header      = { 0.10, 0.11, 0.13, 1 },
+  panel       = { 0.09, 0.09, 0.11, 0.95 },
+  row         = { 0.12, 0.12, 0.15, 0.85 },
+  rowAlt      = { 0.14, 0.14, 0.17, 0.85 },
+  rowHover    = { 0.19, 0.24, 0.31, 0.95 },
+  border      = { 0.18, 0.19, 0.24, 1 },
+  button      = { 0.14, 0.15, 0.18, 1 },
+  buttonHover = { 0.20, 0.22, 0.27, 1 },
+  buttonDown  = { 0.10, 0.11, 0.14, 1 },
+  accent      = { 0.22, 0.70, 0.44, 1 },
+  text        = { 0.93, 0.94, 0.96, 1.0 },
+  muted       = { 0.60, 0.63, 0.70, 1.0 },
 }
+
+-- flat 1px bordered surfaces, the tiled tooltip textures look dated
+local FLAT_BACKDROP = {
+  bgFile = "Interface\\Buttons\\WHITE8X8",
+  edgeFile = "Interface\\Buttons\\WHITE8X8",
+  edgeSize = 1,
+}
+
 local function GetAddonVersion()
   return C_AddOns.GetAddOnMetadata(addon_name, "Version")
 end
 
+---@param frame table backdrop frame
+---@param bgColor table
+---@param borderColor table?
+local function ApplyFlatTheme(frame, bgColor, borderColor)
+  frame:SetBackdrop(FLAT_BACKDROP)
+  frame:SetBackdropColor(unpack(bgColor))
+  frame:SetBackdropBorderColor(unpack(borderColor or COLORS.border))
+end
+
 local function ApplyPanelTheme(frame)
-  frame:SetBackdrop({
-    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true,
-    tileSize = 16,
-    edgeSize = 12,
-    insets = { left = 4, right = 4, top = 4, bottom = 4 },
-  })
-  frame:SetBackdropColor(unpack(COLORS.panel))
-  frame:SetBackdropBorderColor(unpack(COLORS.border))
+  ApplyFlatTheme(frame, COLORS.panel)
 end
 
 local function ApplyWindowTheme(frame)
-  frame:SetBackdrop({
-    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true,
-    tileSize = 16,
-    edgeSize = 12,
-    insets = { left = 4, right = 4, top = 4, bottom = 4 },
-  })
-  frame:SetBackdropColor(unpack(COLORS.bg))
-  frame:SetBackdropBorderColor(unpack(COLORS.border))
+  ApplyFlatTheme(frame, COLORS.window)
+end
+
+---@param parent Frame
+---@param text string
+---@param width number?
+---@param height number?
+local function CreateButton(parent, text, width, height)
+  local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
+  button:SetSize(width or 80, height or 22)
+  ApplyFlatTheme(button, COLORS.button)
+
+  local label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  label:SetPoint("CENTER")
+  label:SetTextColor(unpack(COLORS.text))
+  button:SetFontString(label)
+  button:SetText(text)
+  button.label = label
+
+  button:SetScript("OnEnter", function(self) self:SetBackdropColor(unpack(COLORS.buttonHover)) end)
+  button:SetScript("OnLeave", function(self) self:SetBackdropColor(unpack(COLORS.button)) end)
+  button:SetScript("OnMouseDown", function(self) self:SetBackdropColor(unpack(COLORS.buttonDown)) end)
+  button:SetScript("OnMouseUp", function(self)
+    self:SetBackdropColor(unpack(self:IsMouseOver() and COLORS.buttonHover or COLORS.button))
+  end)
+
+  return button
+end
+
+---Underline style tab, the active one gets an accent bar and brighter text.
+---@param parent Frame
+---@param text string
+local function CreateTab(parent, text)
+  local tab = CreateFrame("Button", nil, parent)
+  tab:SetHeight(28)
+
+  local label = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  label:SetPoint("CENTER", 0, 2)
+  tab:SetFontString(label)
+  tab:SetText(text)
+  tab:SetWidth(math.max(90, label:GetStringWidth() + 30))
+
+  local underline = tab:CreateTexture(nil, "ARTWORK")
+  underline:SetColorTexture(unpack(COLORS.accent))
+  underline:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", 6, 0)
+  underline:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", -6, 0)
+  underline:SetHeight(2)
+  underline:Hide()
+
+  function tab:SetSelected(selected)
+    self.selected = selected and true or false
+    underline:SetShown(self.selected)
+    label:SetTextColor(unpack(self.selected and COLORS.text or COLORS.muted))
+  end
+
+  tab:SetScript("OnEnter", function(self)
+    if not self.selected then label:SetTextColor(unpack(COLORS.text)) end
+  end)
+  tab:SetScript("OnLeave", function(self)
+    if not self.selected then label:SetTextColor(unpack(COLORS.muted)) end
+  end)
+
+  tab:SetSelected(false)
+
+  return tab
 end
 
 local function EnableHyperlinks(editBox)
@@ -151,14 +219,21 @@ local function GetClassColorForValue(classValue)
   return nil
 end
 
-local function ApplyRowClassBackdrop(row, classValue)
+---Class color goes on the accent bar and the name only, a fully tinted row is too loud to read.
+---@param row table
+---@param classValue string|number?
+---@param index number used for the zebra striping
+local function ApplyRowStyle(row, classValue, index)
+  row.baseColor = (index % 2 == 0) and COLORS.rowAlt or COLORS.row
+  row:SetBackdropColor(unpack(row.baseColor))
+
   local r, g, b = GetClassColorForValue(classValue)
   if r then
-    row:SetBackdropColor(r, g, b, 0.50)
-    row:SetBackdropBorderColor(r, g, b, 1)
+    row.accent:SetColorTexture(r, g, b, 1)
+    row.name:SetTextColor(r, g, b, 1)
   else
-    row:SetBackdropColor(unpack(COLORS.rowAlt))
-    row:SetBackdropBorderColor(0.22, 0.25, 0.32, 0.50)
+    row.accent:SetColorTexture(unpack(COLORS.accent))
+    row.name:SetTextColor(unpack(COLORS.text))
   end
 end
 local function GetCharacterList()
@@ -379,10 +454,16 @@ local GUI = {
 
 ns.gui = GUI
 
-local function CreateListPanel(parent)
-  local scroll = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
-  scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -8)
-  scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -8, 8)
+---Scrollable area with the thin blizzard scrollbar instead of the chunky UIPanelScrollFrameTemplate one.
+---@param parent Frame
+---@param insetX number?
+---@param insetY number?
+local function CreateListPanel(parent, insetX, insetY)
+  insetX, insetY = insetX or 8, insetY or 8
+
+  local scroll = CreateFrame("ScrollFrame", nil, parent)
+  scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", insetX, -insetY)
+  scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -(insetX + 14), insetY)
 
   local content = CreateFrame("Frame", nil, scroll)
   content:SetWidth(1)
@@ -393,6 +474,19 @@ local function CreateListPanel(parent)
     content:SetWidth(self:GetWidth())
   end)
 
+  if ScrollUtil and ScrollUtil.InitScrollFrameWithScrollBar then
+    local scrollBar = CreateFrame("EventFrame", nil, parent, "MinimalScrollBar")
+    scrollBar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", 6, 0)
+    scrollBar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", 6, 0)
+    ScrollUtil.InitScrollFrameWithScrollBar(scroll, scrollBar)
+  end
+  if not scroll:GetScript("OnMouseWheel") then -- only if the scrollbar didnt bring its own wheel handling
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", function(self, delta)
+      self:SetVerticalScroll(Clamp(self:GetVerticalScroll() - delta * 40, 0, self:GetVerticalScrollRange()))
+    end)
+  end
+
   return scroll, content
 end
 
@@ -402,10 +496,11 @@ function GUI:CreateDetailWindow()
   end
 
   local frame = CreateFrame("Frame", "WowUtilsDetailWindow", UIParent, "BackdropTemplate")
-  frame:SetSize(500, 420)
+  frame:SetSize(540, 460)
   frame:SetPoint("CENTER")
   frame:SetMovable(true)
   frame:EnableMouse(true)
+  frame:SetClampedToScreen(true)
   frame:RegisterForDrag("LeftButton")
   frame:SetScript("OnDragStart", frame.StartMoving)
   frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
@@ -413,41 +508,33 @@ function GUI:CreateDetailWindow()
   -- keep the popup above the main window (HIGH), with a solid background so it doesnt bleed through
   frame:SetFrameStrata("DIALOG")
   frame:SetToplevel(true)
-  frame:SetBackdropColor(unpack(COLORS.bgSolid))
+  frame:SetBackdropColor(unpack(COLORS.windowSolid))
   frame:Hide()
 
   local header = frame:CreateTexture(nil, "ARTWORK")
-  header:SetColorTexture(unpack(COLORS.accent))
-  header:SetPoint("TOPLEFT", frame, "TOPLEFT", 6, -6)
-  header:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -6, -6)
-  header:SetHeight(28)
+  header:SetColorTexture(unpack(COLORS.header))
+  header:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -1)
+  header:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -1, -1)
+  header:SetHeight(34)
 
-  local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  title:SetPoint("LEFT", header, "LEFT", 10, 0)
+  local headerLine = frame:CreateTexture(nil, "OVERLAY")
+  headerLine:SetColorTexture(unpack(COLORS.accent))
+  headerLine:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 0, 0)
+  headerLine:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", 0, 0)
+  headerLine:SetHeight(1)
+
+  local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  title:SetPoint("LEFT", header, "LEFT", 12, 0)
   title:SetText("WowUtils")
   title:SetTextColor(unpack(COLORS.text))
 
-  local closeBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
-  closeBtn:SetSize(80, 22)
-  closeBtn:SetPoint("TOPRIGHT", header, "TOPRIGHT", -6, -3)
-  closeBtn:SetBackdrop({
-    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true,
-    tileSize = 12,
-    edgeSize = 8,
-    insets = { left = 3, right = 3, top = 3, bottom = 3 },
-  })
-  closeBtn:SetBackdropColor(0.18, 0.18, 0.20, 0.95)
-  closeBtn:SetBackdropBorderColor(0.35, 0.40, 0.50, 0.95)
-  closeBtn:SetText("Close")
-  closeBtn:SetNormalFontObject("GameFontHighlightSmall")
-  closeBtn:SetHighlightFontObject("GameFontHighlightSmall")
+  local closeBtn = CreateButton(frame, "X", 24, 22)
+  closeBtn:SetPoint("RIGHT", header, "RIGHT", -8, 0)
   closeBtn:SetScript("OnClick", function() frame:Hide() end)
 
   local selectToggle = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
-  selectToggle:SetSize(24, 24)
-  selectToggle:SetPoint("RIGHT", closeBtn, "LEFT", -70, 0)
+  selectToggle:SetSize(22, 22)
+  selectToggle:SetPoint("RIGHT", closeBtn, "LEFT", -78, 0)
   selectToggle:SetChecked(false)
 
   local selectToggleLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -455,14 +542,13 @@ function GUI:CreateDetailWindow()
   selectToggleLabel:SetText("Select text")
   selectToggleLabel:SetTextColor(unpack(COLORS.muted))
 
-  local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-  scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -42)
-  scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 12)
+  local body = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+  body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 8, -8)
+  body:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -8, 8)
+  ApplyPanelTheme(body)
 
-  local content = CreateFrame("Frame", nil, scroll)
-  content:SetWidth(450)
+  local scroll, content = CreateListPanel(body, 10, 8)
   content:SetHeight(300)
-  scroll:SetScrollChild(content)
 
   -- Use a hyperlink-enabled, read-only EditBox instead of a FontString so
   -- item/spell/etc links show tooltips on hover, respond to clicks (dressing
@@ -471,7 +557,7 @@ function GUI:CreateDetailWindow()
   -- hyperlink clicks don't fight with click-drag selection.
   local text = CreateLinkText(content, true, GameFontHighlightSmall)
   text:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
-  text:SetWidth(430)
+  text:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
   text:SetHeight(300)
 
   selectToggle:SetScript("OnClick", function(self)
@@ -492,6 +578,8 @@ function GUI:CreateDetailWindow()
   frame.text = text
   frame.title = title
   frame.selectToggle = selectToggle
+
+  tinsert(UISpecialFrames, "WowUtilsDetailWindow") -- close on escape
 
   self.detailFrame = frame
   self.detailText = text
@@ -540,66 +628,56 @@ local function SetupList(parent, getEntries, onSelect)
       if not row then
         row = CreateFrame("Button", nil, content, "BackdropTemplate")
         row:SetHeight(ROW_HEIGHT)
-        row:SetPoint("LEFT", content, "LEFT", 8, 0)
-        row:SetPoint("RIGHT", content, "RIGHT", -8, 0)
-        row:SetBackdrop({
-          bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-          edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-          tile = true,
-          tileSize = 12,
-          edgeSize = 8,
-          insets = { left = 3, right = 3, top = 3, bottom = 3 },
-        })
-        row:SetBackdropColor(unpack(COLORS.rowAlt))
-        row:SetBackdropBorderColor(0.22, 0.25, 0.32, 0.50)
-
-        row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.text:SetPoint("LEFT", row, "LEFT", 10, 0)
-        row.text:SetPoint("RIGHT", row, "RIGHT", -8, 0)
-        row.text:SetJustifyH("LEFT")
-        row.text:SetTextColor(unpack(COLORS.text))
-
-        row.highlight = row:CreateTexture(nil, "BACKGROUND")
-        row.highlight:SetAllPoints(row)
-        row.highlight:SetColorTexture(unpack(COLORS.hover))
-        row.highlight:Hide()
+        row:SetPoint("LEFT", content, "LEFT", 4, 0)
+        row:SetPoint("RIGHT", content, "RIGHT", -4, 0)
+        ApplyFlatTheme(row, COLORS.row, COLORS.border)
 
         row.accent = row:CreateTexture(nil, "ARTWORK")
-        row.accent:SetColorTexture(unpack(COLORS.accentSoft))
-        row.accent:SetPoint("TOPLEFT", row, "TOPLEFT", 2, -2)
-        row.accent:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 2, 2)
+        row.accent:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
+        row.accent:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 1, 1)
         row.accent:SetWidth(3)
 
+        row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.name:SetPoint("LEFT", row, "LEFT", 12, 0)
+        row.name:SetJustifyH("LEFT")
+
+        -- secondary info is right aligned and muted so the names stay scannable
+        row.info = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.info:SetPoint("RIGHT", row, "RIGHT", -10, 0)
+        row.info:SetPoint("LEFT", row.name, "RIGHT", 10, 0)
+        row.info:SetJustifyH("RIGHT")
+        row.info:SetTextColor(unpack(COLORS.muted))
+
         row:SetScript("OnEnter", function(self)
-          self.highlight:Show()
+          self:SetBackdropColor(unpack(COLORS.rowHover))
         end)
 
         row:SetScript("OnLeave", function(self)
-          self.highlight:Hide()
+          self:SetBackdropColor(unpack(self.baseColor or COLORS.row))
         end)
 
         rows[i] = row
       end
 
-      row:SetPoint("TOP", content, "TOP", 0, -(i - 1) * ROW_HEIGHT - 8)
+      row:SetPoint("TOP", content, "TOP", 0, -(i - 1) * (ROW_HEIGHT + ROW_SPACING) - 4)
       row:Show()
 
-      local label = entry.name or "?"
+      row.name:SetText(sformat("%s %s", ns.helpers.GetIconTextureStringForClass(entry.class), entry.name or "?"))
       if entry.kind == "character" then
-        label = sformat("%s %s%s%s", label, ns.helpers.GetFormatedLastUpdateTime(entry.update or 0), entry.syncLists and " SyncLists: " or "", entry.syncLists and table.concat(entry.syncLists, ", ") or "")
+        row.info:SetText(sformat("%s%s", entry.syncLists and sformat("%s   ", table.concat(entry.syncLists, ", ")) or "",
+          ns.helpers.GetFormatedLastUpdateTime(entry.update or 0)))
       else
-        label = label .. " - " .. tostring(entry.key or "Unknown")
-        label = label .. " " .. ns.helpers.GetFormatedLastUpdateTime(entry.update or 0)
+        row.info:SetText(sformat("%s  %s", tostring(entry.key or "Unknown"),
+          ns.helpers.GetFormatedLastUpdateTime(entry.update or 0)))
       end
-      row.text:SetText(label)
 
       row:SetScript("OnClick", function()
         onSelect(entry)
       end)
-      ApplyRowClassBackdrop(row, entry.class)
+      ApplyRowStyle(row, entry.class, i)
     end
 
-    content:SetHeight(math.max(1, #entries * ROW_HEIGHT + 8))
+    content:SetHeight(math.max(1, #entries * (ROW_HEIGHT + ROW_SPACING) + 8))
   end
 
   return Refresh
@@ -615,6 +693,7 @@ function GUI:Create()
   frame:SetPoint("CENTER")
   frame:SetMovable(true)
   frame:EnableMouse(true)
+  frame:SetClampedToScreen(true)
   frame:RegisterForDrag("LeftButton")
   frame:SetScript("OnDragStart", frame.StartMoving)
   frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
@@ -622,111 +701,73 @@ function GUI:Create()
   frame:SetFrameStrata("HIGH")
   frame:Hide()
 
+  tinsert(UISpecialFrames, "WowUtilsGUIFrame") -- close on escape
+
+  frame:SetScript("OnHide", function()
+    if self.detailFrame then -- the popup has no reason to stick around without the window it was opened from
+      self.detailFrame:Hide()
+    end
+  end)
+
   local header = frame:CreateTexture(nil, "ARTWORK")
-  header:SetColorTexture(unpack(COLORS.accent))
-  header:SetPoint("TOPLEFT", frame, "TOPLEFT", 6, -6)
-  header:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -6, -6)
-  header:SetHeight(36)
+  header:SetColorTexture(unpack(COLORS.header))
+  header:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -1)
+  header:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -1, -1)
+  header:SetHeight(HEADER_HEIGHT)
+
+  local headerLine = frame:CreateTexture(nil, "OVERLAY")
+  headerLine:SetColorTexture(unpack(COLORS.accent))
+  headerLine:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 0, 0)
+  headerLine:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", 0, 0)
+  headerLine:SetHeight(1)
 
   local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  title:SetPoint("LEFT", header, "LEFT", 10, 0)
+  title:SetPoint("TOPLEFT", header, "TOPLEFT", 12, -7)
+  title:SetText(sformat("|T%s:0:0|t WowUtils", ns.logoFile))
+  title:SetTextColor(unpack(COLORS.text))
 
   local addonVersion = GetAddonVersion()
   local dbVersion = ns.config and ns.config.currentDBVersion or "?"
   local configVersion = ns.config and ns.config.configVersion or "?"
 
-  title:SetText(sformat("|T%s:0:0|t WowUtils v%s | db:%s | cfg:%s", ns.logoFile, addonVersion, dbVersion, configVersion))
-  title:SetTextColor(unpack(COLORS.text))
-
   local subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  subtitle:SetPoint("LEFT", title, "RIGHT", 10, 0)
-  subtitle:SetText("Database explorer (for debugging purposes only)")
+  subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 1, -3)
+  subtitle:SetText(sformat("v%s | db:%s | cfg:%s | database explorer", addonVersion, dbVersion, configVersion))
   subtitle:SetTextColor(unpack(COLORS.muted))
 
-  local closeBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
-  closeBtn:SetSize(70, 22)
-  closeBtn:SetPoint("TOPRIGHT", header, "TOPRIGHT", -6, -7)
-  closeBtn:SetBackdrop({
-    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true,
-    tileSize = 12,
-    edgeSize = 8,
-    insets = { left = 3, right = 3, top = 3, bottom = 3 },
-  })
-  closeBtn:SetBackdropColor(0.18, 0.18, 0.20, 0.95)
-  closeBtn:SetBackdropBorderColor(0.35, 0.40, 0.50, 0.95)
-  closeBtn:SetText("Close")
-  closeBtn:SetNormalFontObject("GameFontHighlightSmall")
-  closeBtn:SetHighlightFontObject("GameFontHighlightSmall")
+  local closeBtn = CreateButton(frame, "X", 24, 22)
+  closeBtn:SetPoint("TOPRIGHT", header, "TOPRIGHT", -8, -11)
   closeBtn:SetScript("OnClick", function()
     frame:Hide()
   end)
 
-  local refreshBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
-  refreshBtn:SetSize(85, 22)
+  local refreshBtn = CreateButton(frame, "Refresh", 80, 22)
   refreshBtn:SetPoint("TOPRIGHT", closeBtn, "TOPLEFT", -6, 0)
-  refreshBtn:SetBackdrop({
-    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true,
-    tileSize = 12,
-    edgeSize = 8,
-    insets = { left = 3, right = 3, top = 3, bottom = 3 },
-  })
-  refreshBtn:SetBackdropColor(0.18, 0.18, 0.20, 0.95)
-  refreshBtn:SetBackdropBorderColor(0.35, 0.40, 0.50, 0.95)
-  refreshBtn:SetText("Refresh")
-  refreshBtn:SetNormalFontObject("GameFontHighlightSmall")
-  refreshBtn:SetHighlightFontObject("GameFontHighlightSmall")
   refreshBtn:SetScript("OnClick", function()
     self:RefreshData()
   end)
 
-
   self.frame = frame
 
-  local tabHolder = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-  tabHolder:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -10)
-  tabHolder:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, -10)
-  tabHolder:SetHeight(34)
+  local tabHolder = CreateFrame("Frame", nil, frame)
+  tabHolder:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 7, 0)
+  tabHolder:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -7, 0)
+  tabHolder:SetHeight(30)
 
-  local rosterBtn = CreateFrame("Button", nil, tabHolder, "BackdropTemplate")
-  rosterBtn:SetSize(110, 26)
-  rosterBtn:SetPoint("LEFT", tabHolder, "LEFT", 0, 0)
-  rosterBtn:SetBackdrop({
-    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true,
-    tileSize = 12,
-    edgeSize = 8,
-    insets = { left = 3, right = 3, top = 3, bottom = 3 },
-  })
-  rosterBtn:SetBackdropColor(0.16, 0.16, 0.18, 0.95)
-  rosterBtn:SetBackdropBorderColor(0.28, 0.32, 0.42, 0.95)
-  rosterBtn:SetText("Roster")
-  rosterBtn:SetNormalFontObject("GameFontHighlightSmall")
-  rosterBtn:SetHighlightFontObject("GameFontHighlightSmall")
+  local tabLine = tabHolder:CreateTexture(nil, "ARTWORK")
+  tabLine:SetColorTexture(unpack(COLORS.border))
+  tabLine:SetPoint("BOTTOMLEFT", tabHolder, "BOTTOMLEFT", 0, 0)
+  tabLine:SetPoint("BOTTOMRIGHT", tabHolder, "BOTTOMRIGHT", 0, 0)
+  tabLine:SetHeight(1)
+
+  local rosterBtn = CreateTab(tabHolder, "Roster")
+  rosterBtn:SetPoint("BOTTOMLEFT", tabHolder, "BOTTOMLEFT", 0, 0)
   rosterBtn:SetScript("OnClick", function()
     self:SetTab(1)
   end)
 
-  local droptimizerBtn = CreateFrame("Button", nil, tabHolder, "BackdropTemplate")
-  droptimizerBtn:SetSize(120, 26)
-  droptimizerBtn:SetPoint("LEFT", rosterBtn, "RIGHT", 8, 0)
-  droptimizerBtn:SetBackdrop({
-    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true,
-    tileSize = 12,
-    edgeSize = 8,
-    insets = { left = 3, right = 3, top = 3, bottom = 3 },
-  })
-  droptimizerBtn:SetBackdropColor(0.16, 0.16, 0.18, 0.95)
-  droptimizerBtn:SetBackdropBorderColor(0.28, 0.32, 0.42, 0.95)
-  droptimizerBtn:SetText("Droptimizer")
-  droptimizerBtn:SetNormalFontObject("GameFontHighlightSmall")
-  droptimizerBtn:SetHighlightFontObject("GameFontHighlightSmall")
+  local droptimizerBtn = CreateTab(tabHolder, "Droptimizer")
+  droptimizerBtn:SetPoint("BOTTOMLEFT", rosterBtn, "BOTTOMRIGHT", 4, 0)
   droptimizerBtn:SetScript("OnClick", function()
     self:SetTab(2)
   end)
@@ -787,13 +828,7 @@ function GUI:SetTab(index)
   end
 
   for i, btn in ipairs(self.tabButtons) do
-    if i == self.activeTab then
-      btn:SetBackdropColor(unpack(COLORS.active))
-      btn:SetBackdropBorderColor(unpack(COLORS.accent))
-    else
-      btn:SetBackdropColor(0.16, 0.16, 0.18, 0.95)
-      btn:SetBackdropBorderColor(0.28, 0.32, 0.42, 0.95)
-    end
+    btn:SetSelected(i == self.activeTab)
   end
 end
 function GUI:RefreshData()
