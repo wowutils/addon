@@ -48,3 +48,5 @@ function ns.items.CacheBonusRollResult(typeIdentifier, itemLink, quantity, specI
     instanceId = hasValidCacheData and cachedPopup.instanceId or 0,
   })
 end
+
+-- TODO bonus coin history based on tooltips

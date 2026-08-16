@@ -361,25 +361,15 @@ ns.mapping = {
             if not cache then
               cache = {}
               -- use guids so we dont overwrite anything by accident
-              for guid, charData in pairs(WowUtilsDB.others) do
-                if charData.droptimizerKey then
-                  if cache[charData.droptimizerKey] then -- we have multiple data points for same key (guid has changed)
-                    if WowUtilsDB.others[cache[charData.droptimizerKey]].lastUpdate < charData.lastUpdate then
+              for _, charDB in ipairs({ WowUtilsDB.others, WowUtilsDB.ownCharacters }) do
+                for guid, charData in pairs(charDB) do
+                  if charData.droptimizerKey then
+                    local cachedGuid = cache[charData.droptimizerKey]
+                    -- the same key can live in both dbs, so always look the cached guid up in both
+                    local cachedChar = cachedGuid and (WowUtilsDB.ownCharacters[cachedGuid] or WowUtilsDB.others[cachedGuid])
+                    if not cachedChar or (cachedChar.lastUpdate or 0) < (charData.lastUpdate or 0) then -- we have multiple data points for same key (guid has changed)
                       cache[charData.droptimizerKey] = guid
                     end
-                  else
-                    cache[charData.droptimizerKey] = guid
-                  end
-                end
-              end
-              for guid, charData in pairs(WowUtilsDB.ownCharacters) do
-                if charData.droptimizerKey then
-                  if cache[charData.droptimizerKey] then -- we have multiple data points for same key (guid has changed)
-                    if WowUtilsDB.ownCharacters[cache[charData.droptimizerKey]].lastUpdate < charData.lastUpdate then
-                      cache[charData.droptimizerKey] = guid
-                    end
-                  else
-                    cache[charData.droptimizerKey] = guid
                   end
                 end
               end

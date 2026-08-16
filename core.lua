@@ -87,7 +87,7 @@ do -- Weekly vault rewards
     local t = {}
     local activities = C_WeeklyRewards.GetActivities()
     for _, activityInfo in ipairs(activities) do
-      if (activityInfo.progress or 0) >= activityInfo.threshold and activityInfo.level > 0 then
+      if activityInfo.threshold and activityInfo.threshold ~= 0 and (activityInfo.progress or 0) >= activityInfo.threshold then
         t[string.format("%s-%s", activityInfo.type, activityInfo.index)] = activityInfo.level
       end
     end

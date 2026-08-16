@@ -260,3 +260,101 @@ do
     return needsConverting[slot] or slot
   end
 end
+do
+  -- rings, trinkets and one hand weapons resolve to their first slot
+  -- INVTYPE_BAG, INVTYPE_PROFESSION_TOOL, INVTYPE_PROFESSION_GEAR and INVTYPE_EQUIPABLESPELL_* have no single slot
+  local equipLocToInvSlotId = {
+    ["INVTYPE_HEAD"] = INVSLOT_HEAD,
+    ["INVTYPE_NECK"] = INVSLOT_NECK,
+    ["INVTYPE_SHOULDER"] = INVSLOT_SHOULDER,
+    ["INVTYPE_BODY"] = INVSLOT_BODY,
+    ["INVTYPE_CHEST"] = INVSLOT_CHEST,
+    ["INVTYPE_ROBE"] = INVSLOT_CHEST,
+    ["INVTYPE_WAIST"] = INVSLOT_WAIST,
+    ["INVTYPE_LEGS"] = INVSLOT_LEGS,
+    ["INVTYPE_FEET"] = INVSLOT_FEET,
+    ["INVTYPE_WRIST"] = INVSLOT_WRIST,
+    ["INVTYPE_HAND"] = INVSLOT_HAND,
+    ["INVTYPE_FINGER"] = INVSLOT_FINGER1,
+    ["INVTYPE_TRINKET"] = INVSLOT_TRINKET1,
+    ["INVTYPE_CLOAK"] = INVSLOT_BACK,
+    ["INVTYPE_WEAPON"] = INVSLOT_MAINHAND,
+    ["INVTYPE_2HWEAPON"] = INVSLOT_MAINHAND,
+    ["INVTYPE_WEAPONMAINHAND"] = INVSLOT_MAINHAND,
+    ["INVTYPE_RANGED"] = INVSLOT_MAINHAND, -- ranged weapons go to the main hand on retail
+    ["INVTYPE_RANGEDRIGHT"] = INVSLOT_MAINHAND,
+    ["INVTYPE_THROWN"] = INVSLOT_MAINHAND,
+    ["INVTYPE_WEAPONOFFHAND"] = INVSLOT_OFFHAND,
+    ["INVTYPE_SHIELD"] = INVSLOT_OFFHAND,
+    ["INVTYPE_HOLDABLE"] = INVSLOT_OFFHAND,
+  }
+  ---@param equipLoc string
+  ---@return number
+  function ns.helpers.GetInventorySlotByEquipLoc(equipLoc)
+    if not equipLoc then return 0 end
+    return equipLocToInvSlotId[equipLoc] or 0
+  end
+end
+do
+  local padding = 10
+  ---@type table<table, table<number, Texture>>
+  local separators = {}
+
+  local function hideSeparators(tooltip)
+    local textures = separators[tooltip]
+    if not textures then return end
+    for _, tex in ipairs(textures) do
+      tex:Hide()
+    end
+  end
+
+  -- the tooltip has no final width until its shown, so the width is (re)applied on every resize
+  local function resizeSeparators(tooltip)
+    local textures = separators[tooltip]
+    if not textures then return end
+    local width = tooltip:GetWidth() - (padding * 2)
+    if width <= 0 then return end
+    for _, tex in ipairs(textures) do
+      if tex:IsShown() then
+        tex:SetSize(width, 1)
+      end
+    end
+  end
+
+  ---Draws a separator texture above a tooltip line, stretched to the tooltips width.
+  ---Call it right after adding the line, does nothing on a tooltip without a name.
+  ---@param tooltip GameTooltip
+  ---@param lineIndex number? defaults to the line that was added last
+  function ns.helpers.AddTooltipSeparator(tooltip, lineIndex)
+    local tooltipName = tooltip.GetName and tooltip:GetName()
+    local fontString = tooltipName and _G[sformat("%sTextLeft%d", tooltipName, lineIndex or tooltip:NumLines())]
+    if not fontString then return end
+    local textures = separators[tooltip]
+    if not textures then
+      textures = {}
+      separators[tooltip] = textures
+      tooltip:HookScript("OnHide", hideSeparators)
+      tooltip:HookScript("OnSizeChanged", resizeSeparators)
+      if tooltip:HasScript("OnTooltipCleared") then
+        tooltip:HookScript("OnTooltipCleared", hideSeparators)
+      end
+    end
+    local separator
+    for _, tex in ipairs(textures) do
+      if not tex:IsShown() then
+        separator = tex
+        break
+      end
+    end
+    if not separator then
+      separator = tooltip:CreateTexture(nil, "OVERLAY")
+      separator:SetColorTexture(1, 1, 1, 1)
+      tinsert(textures, separator)
+    end
+    separator:ClearAllPoints()
+    -- TOPLEFT gives us the left and top edge of the line, the rest comes from SetSize
+    separator:SetPoint("TOPLEFT", fontString, "TOPLEFT", 0, 2)
+    separator:SetSize(math.max(tooltip:GetWidth() - (padding * 2), 1), 1)
+    separator:Show()
+  end
+end

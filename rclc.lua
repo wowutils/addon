@@ -41,7 +41,8 @@ do
     { 3, ns.enums.itemTrack.hero },
     { 2, ns.enums.itemTrack.champion },
     { 1, ns.enums.itemTrack.veteran },
-    { 5, "convert" } }) do
+    { 5, "convert" },
+    { 6, "bonusCoin"}, }) do
     for currencyId, mapId in pairs(ns.config.currencies) do
       if mapIdToFind[1] == mapId then
         local ci = C_CurrencyInfo.GetCurrencyInfo(currencyId)
@@ -58,7 +59,7 @@ do
   ---@field itemLink string
   ---@field itemTrack wowutils_enums_itemTrack
   ---@field itemId number
-  ---@field equipmentSlot number
+  ---@field invSlotId number
   ---@field itemClassId number
   ---@field itemSubClassId number
   ---@field watermarkSlot number?
@@ -84,7 +85,7 @@ do
       itemId = itemId,
       itemClassId = _item.typeID,
       itemSubClassId = _item.subTypeID,
-      equipmentSlot = C_Item.GetItemInventoryTypeByID(itemId) or 0,
+      invSlotId = _item.equipLoc,
       watermarkSlot = C_ItemUpgrade.GetHighWatermarkSlotForItem(_item.link)
     }
     return itemLinkDataCache[_item.link]
@@ -250,7 +251,7 @@ do
       local alreadyAddedTitle = false
       for _, wlItem in pairs(droptimizerData.wishlist) do
         --print(wlItem.equipmentSlot, itemInfo.equipmentSlot, isMatchingSlot(wlItem.equipmentSlot, itemInfo.equipmentSlot),  isCorrectDif(Item.difficultyId, itemInfo.itemTrack))
-        if isMatchingSlot(wlItem.equipmentSlot, itemInfo.equipmentSlot) and isCorrectDif(wlItem.difficultyId, itemInfo.itemTrack) then
+        if isMatchingSlot(wlItem.equipmentSlot, itemInfo.invSlotId) and isCorrectDif(wlItem.difficultyId, itemInfo.itemTrack) then
         --if isCorrectDif(wlItem.difficultyId, itemInfo.itemTrack) then
           if not alreadyAddedTitle then
             tooltip:AddLine("Wishlist")
@@ -274,7 +275,7 @@ do
             end
           end) do
             ---@cast itemData wowutilsDroptimizerData_droptimizerItem
-            if isMatchingSlot(itemInfo.equipmentSlot, itemData.equipmentSlot) and isCorrectDif(itemData.difficultyId, itemInfo.itemTrack) then
+            if isMatchingSlot(itemInfo.invSlotId, itemData.equipmentSlot) and isCorrectDif(itemData.difficultyId, itemInfo.itemTrack) then
               --[[ if itemInfo.itemId == itemId then
                 foundItem = true
               end --]]
@@ -324,18 +325,21 @@ do
     if playerData then
       --local itemUpgradeInfo  = C_Item.GetItemUpgradeInfo(itemInfo.itemLink)
       tooltip:AddDoubleLine("Currency", ns.helpers.GetFormatedLastUpdateTime(playerData.dataRefreshTimes and playerData.dataRefreshTimes.currency or playerData.currencyUpdated))
+      ns.helpers.AddTooltipSeparator(tooltip)
       if itemInfo.itemTrack == ns.enums.itemTrack.none then
         tooltip:AddLine(unpack(formatCurrencyLine(ns.enums.itemTrack.myth, playerData.currency)))
         tooltip:AddLine(unpack(formatCurrencyLine(ns.enums.itemTrack.hero, playerData.currency)))
         tooltip:AddLine(unpack(formatCurrencyLine(ns.enums.itemTrack.champion, playerData.currency)))
         tooltip:AddLine(unpack(formatCurrencyLine(ns.enums.itemTrack.veteran, playerData.currency)))
         tooltip:AddLine(unpack(formatCurrencyLine("convert", playerData.currency)))
+        tooltip:AddLine(unpack(formatCurrencyLine("bonusCoin", playerData.currency)))
       else
         tooltip:AddLine(unpack(formatCurrencyLine(itemInfo.itemTrack, playerData.currency)))
         tooltip:AddLine(unpack(formatCurrencyLine("convert", playerData.currency)))
+        tooltip:AddLine(unpack(formatCurrencyLine("bonusCoin", playerData.currency)))
       end
       if itemInfo.watermarkSlot then
-        tooltip:AddDoubleLine("Watermarks", ns.helpers.GetFormatedLastUpdateTime(playerData.dataRefreshTimes and playerData.dataRefreshTimes.watermarks or playerData.watermarksUpdated or 0))
+        tooltip:AddDoubleLine("Free updagre up to:", ns.helpers.GetFormatedLastUpdateTime(playerData.dataRefreshTimes and playerData.dataRefreshTimes.watermarks or playerData.watermarksUpdated or 0))
         if playerData.watermarks then
           if weaponSlots[itemInfo.watermarkSlot] then
             tooltip:AddLine(
@@ -450,12 +454,14 @@ end
 
 function rclcMod.UpdateMainModCell(rowFrame, frame, data, cols, row, realrow, column, fShow, table, ...)
   local name = data[realrow].name
-  local guid = UnitGUID(Ambiguate(name, "short"))
+  local guid = UnitGUID(Ambiguate(name, "none"))
   local n, s = strsplit("-", name)
   local droptimizerKey = sformat("%s-%s", n:lower(), ns.GetRealmId(nil, s))
   frame:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
-    GameTooltip:AddLine(name)
+    local unitClassBase = UnitClassBase(Ambiguate(name, "none"))
+    local classColor = C_ClassColor.GetClassColor(unitClassBase)
+    GameTooltip:AddLine(classColor and classColor:WrapTextInColorCode(name) or name)
     if guid and droptimizerKey then
       ns.rclc.AddDataToTooltip(guid, droptimizerKey, GameTooltip)
     else
@@ -538,7 +544,6 @@ function lootPopup.HandleEntry(entry)
     b:SetNormalTexture(ns.logoFile)
     b:SetScript("OnEnter", function(self)
       GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
-      GameTooltip:AddLine("Player")
       ns.rclc.AddDataToTooltip(ns.me.guid, ns.me.droptimizerKey, GameTooltip, entry.item)
       GameTooltip:Show()
     end)

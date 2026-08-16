@@ -69,6 +69,12 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@field droptimizerKey string
 ---@field bonusCoinUsage wowutils_bonusCoinUsage[]
 ---@field bonusCoinUsageUpdated number
+---@field bonusCoinScannedHistory table<number, wowutils_bonuscoinMissingItems[]> -- specID = missingItems[]
+---@field bonusCoinScannedHistoryUpdated number
+
+---@class wowutils_bonuscoinMissingItems
+---@field itemId number
+---@field difId number
 
 ---@class wowutils_bonusCoinUsage
 ---@field difId number
@@ -246,10 +252,10 @@ local function contextUpdated(context)
 end
 
 ---@param context wowutils_enums_context
----@param db wowutils_otherChar|wowutils_ownChar
-function ns.database.DataRefreshed(context, db)
-  if not (context and db) then
-    ns.Debug.print("Trying to call ns.database.DataRefreshed with incorrect data - context '%s', db '%s'", tostring(context), tostring(db))
+---@param targetDB wowutils_otherChar|wowutils_ownChar
+function ns.database.DataRefreshed(context, targetDB)
+  if not (context and targetDB) then
+    ns.Debug.print("Trying to call ns.database.DataRefreshed with incorrect data - context '%s', targetDB '%s'", tostring(context), tostring(targetDB))
     return
   end
   local _type
@@ -265,12 +271,14 @@ function ns.database.DataRefreshed(context, db)
     _type = "weeklyRewards"
   elseif context == ns.enums.context.quests then
     _type = "quests"
+  elseif context == ns.enums.context.bonusCoin then
+    _type ="bonusCoinUsage"
   end
   if not _type then return end
-  if not db.dataRefreshTimes then
-    db.dataRefreshTimes = {}
+  if not targetDB.dataRefreshTimes then
+    targetDB.dataRefreshTimes = {}
   end
-  db.dataRefreshTimes[_type] = GetServerTime()
+  targetDB.dataRefreshTimes[_type] = GetServerTime()
 end
 ---@param context string
 ---@param id string|number?

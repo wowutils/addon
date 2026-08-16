@@ -11,6 +11,7 @@ local ROW_HEIGHT = 28
 
 local COLORS = {
   bg = {0.07, 0.07, 0.09, .9},
+  bgSolid = { 0.07, 0.07, 0.09, 1 },
   panel = { 0.13, 0.13, 0.16, 0.97 },
   border = { 0.28, 0.32, 0.42, 0.95 },
   accent = {0.09, 0.2, 0.12, 1},
@@ -296,7 +297,7 @@ local function BuildDetailTextForCharacter(char)
       tinsert(lines, pad(sformat("isWeeklyQuest: %s", getColoredBoolean(questData.isWeeklyQuest)), 2))
     end
   end
-  tinsert(lines, "Watermarks " .. ns.helpers.GetFormatedLastUpdateTime(char.watermarksUpdated))
+  tinsert(lines, "Free updagre up to " .. ns.helpers.GetFormatedLastUpdateTime(char.watermarksUpdated))
   local watermarksFound = false
   for slotId, ilvl in pairs(char.watermarks) do
     watermarksFound = true
@@ -409,6 +410,10 @@ function GUI:CreateDetailWindow()
   frame:SetScript("OnDragStart", frame.StartMoving)
   frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
   ApplyWindowTheme(frame)
+  -- keep the popup above the main window (HIGH), with a solid background so it doesnt bleed through
+  frame:SetFrameStrata("DIALOG")
+  frame:SetToplevel(true)
+  frame:SetBackdropColor(unpack(COLORS.bgSolid))
   frame:Hide()
 
   local header = frame:CreateTexture(nil, "ARTWORK")
@@ -614,6 +619,7 @@ function GUI:Create()
   frame:SetScript("OnDragStart", frame.StartMoving)
   frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
   ApplyWindowTheme(frame)
+  frame:SetFrameStrata("HIGH")
   frame:Hide()
 
   local header = frame:CreateTexture(nil, "ARTWORK")
