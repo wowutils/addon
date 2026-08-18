@@ -6,6 +6,7 @@ local addon_name, ns = ...
 local sformat, tconcat = string.format, table.concat
 local moduleName = "WowUtilsRCLC"
 local columnName = "wowutils"
+local wishlistColumnName = "wishlist"
 ---@class wowutils_rclc
 ns.rclc = {}
 local private = {}
@@ -233,6 +234,25 @@ do
       return bestItem, bestDif and getSimLineColor(bestDif) or nil
     end
   end
+  ---What the player picked for the viewed item on the website: the group's own tier label
+  ---(already resolved from `wishlistMapping` at import), matched on the exact item at the
+  ---difficulty being looted. Same-slot-but-other-item picks stay in the tooltip only.
+  ---@param droptimizerKey string
+  ---@param entryItem table? rclc item entry
+  ---@return string? label
+  ---@return wowutilsDroptimizerData_wishlistItem? pick
+  function private.findWishlistPickForWindow(droptimizerKey, entryItem)
+    local itemInfo = getItemInfo(entryItem)
+    if not itemInfo then return nil end
+    local droptimizerData = WowUtilsDB.droptimizerData[droptimizerKey]
+    if not droptimizerData then return nil end
+    for _, wlItem in pairs(droptimizerData.wishlist) do
+      if wlItem.itemId == itemInfo.itemId and isCorrectDif(wlItem.difficultyId, itemInfo.itemTrack) then
+        return wlItem.priority, wlItem
+      end
+    end
+    return nil
+  end
   local function isMatchingSlot(slot1, slot2)
     if slot1 == slot2 then return true end
     return ns.helpers.GetUniversalSlot(slot1) == ns.helpers.GetUniversalSlot(slot2)
@@ -386,6 +406,14 @@ function rclcMod:InitialSetup()
     DoCellUpdate = self.UpdateMainModCell,
     colName = columnName,
   })
+  table.insert(ns.rclc.votingWindow.scrollCols, {
+    name = wishlistColumnName,
+    align = "CENTER",
+    width = 80,
+    pos = #ns.rclc.votingWindow.scrollCols + 1,
+    DoCellUpdate = self.UpdateWishlistCell,
+    colName = wishlistColumnName,
+  })
   for _, v in ipairs(ns.rclc.votingWindow.scrollCols) do
     if v.sortNext then
       ns.Debug.print("%s - %s", v.colName, v.sortNext)
@@ -452,11 +480,17 @@ function rclcMod:GetScrollColIndexFromName(name)
   return ns.rclc.votingWindow:GetColumnIndexFromName(name)
 end
 
-function rclcMod.UpdateMainModCell(rowFrame, frame, data, cols, row, realrow, column, fShow, table, ...)
-  local name = data[realrow].name
+---@param name string candidate name as rclc stores it (name-realm)
+---@return string? guid
+---@return string droptimizerKey
+local function getRowKeys(name)
   local guid = UnitGUID(Ambiguate(name, "none"))
   local n, s = strsplit("-", name)
-  local droptimizerKey = sformat("%s-%s", n:lower(), ns.GetRealmId(nil, s))
+  return guid, sformat("%s-%s", n:lower(), ns.GetRealmId(nil, s))
+end
+
+---Hover on any of our cells shows the full per-candidate breakdown for the viewed item.
+local function attachRowTooltip(frame, name, guid, droptimizerKey)
   frame:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
     local unitClassBase = UnitClassBase(Ambiguate(name, "none"))
@@ -472,6 +506,25 @@ function rclcMod.UpdateMainModCell(rowFrame, frame, data, cols, row, realrow, co
   frame:SetScript("OnLeave", function()
     GameTooltip:Hide()
   end)
+end
+
+function rclcMod.UpdateWishlistCell(rowFrame, frame, data, cols, row, realrow, column, fShow, table, ...)
+  local name = data[realrow].name
+  local guid, droptimizerKey = getRowKeys(name)
+  attachRowTooltip(frame, name, guid, droptimizerKey)
+  local label = private.findWishlistPickForWindow(droptimizerKey)
+  -- lib-st sizes the cell text to the column width; with wrapping off the client
+  -- ellipsizes anything wider, which covers arbitrary site labels safely.
+  frame.text:SetWordWrap(false)
+  frame.text:SetNonSpaceWrap(false)
+  frame.text:SetText(label or "---")
+  frame.text:SetTextColor(1, 1, 1)
+end
+
+function rclcMod.UpdateMainModCell(rowFrame, frame, data, cols, row, realrow, column, fShow, table, ...)
+  local name = data[realrow].name
+  local guid, droptimizerKey = getRowKeys(name)
+  attachRowTooltip(frame, name, guid, droptimizerKey)
   --[[
   local f = frame.wowutilsButton
   if not f then
