@@ -420,6 +420,7 @@ ns.mapping = {
           updateRefreshTimeIfNeededForFullSync(c, t, v.refreshKey, false)
         end
       end
+      c.addonVersion = t.addonVersion -- in theory incoming data should be coming from newer point
       if not updated then return end
       c.lastUpdateReceived = GetServerTime()
     end,
@@ -443,14 +444,7 @@ ns.mapping = {
       ns.database.CheckEligibleSyncLists()
       ns.Debug.print("Updated syncList '%s' - from '%s'", listId, partialGuid)
     end,
-    --[[
-    for listId,listData in pairs(WowUtilsDB.syncLists) do
-      tinsert(temp, sformat("A%s?%s", listId, ns.mapping.timestamp.ToValue(listData.lastUpdate or 0)))
-    end
-    if #temp == 0 then return "" end
-    return sformat("%s%s", tconcat(temp, "^"))
-    ]]
-    [currentUsage.generalUpdateCheck] = function(configVersion, dbVersion, str, db, targetGuid, channel) -- M
+    [currentUsage.generalUpdateCheck] = function(configVersion, dbVersion, str, db, sourceGuid, channel) -- M
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       for _, dataStr in pairs({ strsplit("^", str) }) do
         local dataType = dataStr:sub(1, 1)
@@ -460,6 +454,13 @@ ns.mapping = {
             if not WowUtilsDB.syncLists[listId] or WowUtilsDB.syncLists[listId].lastUpdate < ns.mapping.timestamp.FromValue(timestamp) then
               ns.communication.RequestSyncList(listId, (WowUtilsDB.syncLists[listId] and WowUtilsDB.syncLists[listId].lastUpdate or 0))
             end
+          end
+        elseif dataType == "B" then -- version
+          local versionStr = dataStr:sub(2)
+          if not db then
+            db = confirmAndReturnDBForChar(sourceGuid, channel)
+            if not db then return end
+            db.addonVersion = versionStr
           end
         end
       end
@@ -705,6 +706,9 @@ do
     return sum - sumOffset
   end
 end
+
+local addonVersion = C_AddOns.GetAddOnMetadata(addon_name, "Version")
+
 ---@param context wowutils_enums_context
 ---@param data any
 ---@param timestamp number?
@@ -841,6 +845,8 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
       tinsert(temp, sformat("A%s?%s", listId, ns.mapping.timestamp.ToValue(listData.lastUpdate or 0)))
     end
     if #temp == 0 then return "" end
+    -- just add addon version here since we are sending this every 2mins for everyone anyway
+    tinsert(temp, sformat("B%s", addonVersion))
     return sformat("%s%s", currentUsage.generalUpdateCheck, tconcat(temp, "^"))
   end
   if context == ns.enums.context.syncListRequest then

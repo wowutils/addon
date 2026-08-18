@@ -71,6 +71,7 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@field bonusCoinUsageUpdated number
 ---@field bonusCoinScannedHistory table<number, wowutils_bonuscoinMissingItems[]> -- specID = missingItems[]
 ---@field bonusCoinScannedHistoryUpdated number
+---@field addonVersion string
 
 ---@class wowutils_bonuscoinMissingItems
 ---@field itemId number
@@ -195,6 +196,7 @@ db.lastCharacter.region = ns.me.regionId
 if db.dbVersion < ns.config.currentDBVersion then
   -- upgrade db based on version
 end
+charDB.addonVersion = C_AddOns.GetAddOnMetadata(addon_name, "Version")
 -- TODO clean old droptimizers...somehow
 
 ---@class wowutils_database

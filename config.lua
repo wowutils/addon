@@ -17,7 +17,7 @@ ns.hasDataAddon = WowUtilsPublicDataAPI and true or false
 ns.config = {
   timestampOffset = 1767225600, -- 	01/01/26 00:00:00 UTC
   currentDBVersion = 2,
-  configVersion = 2,
+  configVersion = 3,
   watermarks = {
     startingPoint = 250,
     multiplier = 50,
@@ -34,6 +34,9 @@ ns.config = {
 
     -- Bonus rolls
     [3418] = 6, -- Nebulous Voidcore
+
+    -- Earned sparks
+    [3509] = 7, -- Tidal Spark Dust
   },
   items = { -- Cached on login and BAG_UPDATE_DELAYED
     craftingItems = 274476, -- Spark of Tides
