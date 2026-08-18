@@ -133,7 +133,8 @@ local GetServerTime, sformat = GetServerTime, string.format
 
 ---@class wowutilsDroptimizerData_wishlistItem
 ---@field equipmentSlot number
----@field priority string
+---@field priority string the group's display label for the tier, as picked on the site
+---@field priorityId number? raw tier 1..5 (site identity, drives the tier color)
 ---@field updated number
 ---@field difficultyId number
 ---@field itemId number
