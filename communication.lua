@@ -30,7 +30,7 @@ local allCharsDB = ns.database.GetAllCharsDB()
 
 ns.communication.msgHandlers[prefixes.normal] = function(prefix, msg, channel, sender)
   if channel ~= "GUILD" then return end -- only accept messages from guild chat for now
-  --if UnitIsUnit("player", sender) then return end
+  if UnitIsUnit("player", sender) then return end
   local uncompressedData, compressedData = strsplit("@", msg, 2)
   local msgType, dbVersion, configVersion, isCbor, idType, id = uncompressedData:match("^(.)(...)(...)(.)(.)(.-)$")
   -- idType S == source guid, T == targetGuid, A meant for all, data from db and not from the character itself

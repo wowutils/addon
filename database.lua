@@ -217,6 +217,9 @@ if clearOldConfigData then
 end
 for k,v in pairs(WowUtilsDB.ownCharacters) do
   ns.database.ownSlugs[v.droptimizerKey] = true
+  if db.others[k] then -- 1.0.0 accepted own messages which added own characters to .others, might as well keep this clean up since its cheap
+    db.others[k] = nil
+  end
   if clearOldConfigData then
     local toDelete = {}
     for currencyId in pairs(v.currency) do
