@@ -200,11 +200,19 @@ function private.ParseWishlistItems(d, wishlistMapping)
   return t
 end
 
+---@param simType wowutils_enums_simTypes
+---@param d wowutilsData_import_droptimizer
+---@return string
+function private.GetDroptimizerId(simType, d)
+  return sformat("%s-%s-%s-%s", simType, d.profileKey, d.fightStyle or 0, d.targets)
+end
+
 ---@param charKey string charName-realmId
 ---@param charData wowutilsData_import_character
 ---@param fileUpdateTime number
+---@param force boolean? re-read the file even though we already imported it once
 ---@return boolean
-local function shouldUpdateDroptimizer(charKey, charData, fileUpdateTime)
+local function shouldUpdateDroptimizer(charKey, charData, fileUpdateTime, force)
   if not WowUtilsDB.droptimizerData[charKey] then
     WowUtilsDB.droptimizerData[charKey] = {
       wishlist = {},
@@ -217,6 +225,9 @@ local function shouldUpdateDroptimizer(charKey, charData, fileUpdateTime)
     }
     return true
   end
+  if force then -- still never clobber data a guildmate synced us from a newer file
+    return WowUtilsDB.droptimizerData[charKey].lastUpdate <= fileUpdateTime
+  end
   return WowUtilsDB.droptimizerData[charKey].lastUpdate < fileUpdateTime
 end
 
@@ -225,18 +236,58 @@ function ns.dataImport.ImportDroptimizers()
   ---@diagnostic disable-next-line: undefined-global
   local t = WowUtilsPublicDataAPI.GetFullData()
   ---@cast t wowutilsData_import
-  if WowUtilsDB.lastDataImport and WowUtilsDB.lastDataImport >= t.writtenAt then return end
+  local force = ns.forceDroptimizerReimport
+  if not force and WowUtilsDB.lastDataImport and WowUtilsDB.lastDataImport >= t.writtenAt then return end
   --if t.schemaVersion == 2 then end
+
+  -- collect what the file actually contains before deleting anything. this has to be unioned
+  -- over every group first: a character can appear in more than one of them, and pruning
+  -- inside the loop below would let whichever group is processed last drop the sims the
+  -- earlier ones listed
+  ---@type table<string, table<number, table<string, boolean>>> charKey -> specId -> droptimizerId
+  local incomingSims = {}
+  ---@type table<string, boolean> charKey
+  local incomingChars = {}
+  ---@type table<string, boolean> groupId
+  local incomingGroups = {}
+  -- the cleanup sweep in database.lua drops sims past this age. apply it here too, otherwise a
+  -- character who is still in the file but hasn't re-simmed would have their old sims swept at
+  -- login and then written straight back the next time the file changes
+  local simKeepThreshold = GetServerTime() - ns.config.droptimizerKeepTime
+  for _, groupData in pairs(t.groups) do
+    incomingGroups[groupData.groupId] = true
+    for _, charData in pairs(groupData.characters) do
+      local charKey = sformat("%s-%s", charData.characterName:lower(), charData.realmId)
+      incomingChars[charKey] = true
+      if not incomingSims[charKey] then
+        incomingSims[charKey] = {}
+      end
+      for _, droptimizerData in pairs(charData.droptimizers) do
+        local simType, validSim = private.GetSimType(droptimizerData.simType)
+        if validSim and droptimizerData.specId and (droptimizerData.simmedAt or 0) >= simKeepThreshold then
+          if not incomingSims[charKey][droptimizerData.specId] then
+            incomingSims[charKey][droptimizerData.specId] = {}
+          end
+          incomingSims[charKey][droptimizerData.specId][private.GetDroptimizerId(simType, droptimizerData)] = true
+        end
+      end
+    end
+  end
+
+  ---@type table<string, boolean> characters we read from this file, and may therefore prune
+  local refreshed = {}
   for _, groupData in pairs(t.groups) do
     for _, charData in pairs(groupData.characters) do
       local charKey = sformat("%s-%s", charData.characterName:lower(), charData.realmId)
-      if shouldUpdateDroptimizer(charKey, charData, t.writtenAt) then
+      if shouldUpdateDroptimizer(charKey, charData, t.writtenAt, force) then
+        refreshed[charKey] = true
         local targetDB = WowUtilsDB.droptimizerData[charKey]
+        targetDB.groupId = groupData.groupId
         -- droptimizers first
         for _, droptimizerData in pairs(charData.droptimizers) do
           local simType, validSim = private.GetSimType(droptimizerData.simType)
-          if validSim then
-            local droptimizerId = sformat("%s-%s-%s-%s", simType, droptimizerData.profileKey, droptimizerData.fightStyle or 0, droptimizerData.targets)
+          if validSim and (droptimizerData.simmedAt or 0) >= simKeepThreshold then
+            local droptimizerId = private.GetDroptimizerId(simType, droptimizerData)
             if droptimizerData.specId then
               if not targetDB.specs[droptimizerData.specId] then
                 targetDB.specs[droptimizerData.specId] = {}
@@ -278,6 +329,45 @@ function ns.dataImport.ImportDroptimizers()
       end
     end
   end
+
+  -- drop sims the file no longer lists. only for characters we just read: anything else may
+  -- be holding newer data synced from a guildmate, which legitimately contains sims this file
+  -- doesn't know about yet
+  for charKey in pairs(refreshed) do
+    local specs = WowUtilsDB.droptimizerData[charKey].specs
+    local keep = incomingSims[charKey]
+    for specId, sims in pairs(specs) do
+      local keepForSpec = keep and keep[specId]
+      for simId in pairs(sims) do
+        if not (keepForSpec and keepForSpec[simId]) then
+          ns.Debug.print("removing droptimizer '%s' (spec %s) from '%s'", simId, tostring(specId), charKey)
+          sims[simId] = nil
+        end
+      end
+      if not next(sims) then
+        specs[specId] = nil
+      end
+    end
+  end
+
+  -- characters whose group is still in the file but who are no longer part of it. clear the
+  -- entry rather than removing it: mapping.lua only rejects incoming droptimizer data when it
+  -- already holds a newer entry, so a nil entry would let that character sync their stale copy
+  -- straight back to us. the cleanup sweep in database.lua reaps the empty shell later.
+  for charKey, charDB in pairs(WowUtilsDB.droptimizerData) do
+    if charDB.groupId and incomingGroups[charDB.groupId] and not incomingChars[charKey] then
+      if (charDB.specs and next(charDB.specs)) or (charDB.wishlist and next(charDB.wishlist)) then
+        ns.Debug.print("clearing droptimizer data for '%s', no longer part of group '%s'", charKey, charDB.groupId)
+        if charDB.specs then wipe(charDB.specs) end
+        if charDB.wishlist then wipe(charDB.wishlist) end
+        if (charDB.lastUpdate or 0) < t.writtenAt then
+          charDB.lastUpdate = t.writtenAt
+        end
+      end
+    end
+  end
+
   WowUtilsDB.lastDataImport = t.writtenAt
+  ns.forceDroptimizerReimport = nil
 end
 ns.dataImport.ImportDroptimizers()

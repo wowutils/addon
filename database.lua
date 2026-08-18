@@ -1,6 +1,7 @@
 ---@class wowutilsPrivate
 ---@field database wowutils_database
 ---@field eligibleSyncLists table<string, boolean>
+---@field forceDroptimizerReimport boolean?
 
 ---@type string, wowutilsPrivate
 local addon_name, ns = ...
@@ -118,6 +119,7 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@field region number
 ---@field class number
 ---@field wishlist table<string, wowutilsDroptimizerData_wishlistItem>
+---@field groupId string? last import group this character belonged to
 
 ---@class wowutilsDroptimizerData_sims
 ---@field simType wowutils_enums_simTypes
@@ -188,6 +190,9 @@ end
 if not WowUtilsDB.syncLists then
   WowUtilsDB.syncLists = {}
 end
+if not WowUtilsDB.droptimizerData then -- the cleanup sweep below walks this on every client now
+  WowUtilsDB.droptimizerData = {}
+end
 ---@type wowutils_ownChar
 local charDB = WowUtilsDB.ownCharacters[ns.me.guid]
 local db = WowUtilsDB
@@ -197,12 +202,18 @@ if db.dbVersion < ns.config.currentDBVersion then
   -- upgrade db based on version
 end
 charDB.addonVersion = C_AddOns.GetAddOnMetadata(addon_name, "Version")
--- TODO clean old droptimizers...somehow
 
 ---@class wowutils_database
 ns.database = {}
 ns.database.ownSlugs = {}
 local clearOldConfigData = (db.configVersion or 0) < ns.config.configVersion
+if clearOldConfigData then
+  -- the import only re-reads a character when the source file is newer than what we already
+  -- stored, so an existing install would never run the droptimizer prune until the next time
+  -- that file happens to change. flag one forced pass rather than zeroing lastUpdate, which
+  -- the cleanup sweep at the bottom of this file reads.
+  ns.forceDroptimizerReimport = true
+end
 for k,v in pairs(WowUtilsDB.ownCharacters) do
   ns.database.ownSlugs[v.droptimizerKey] = true
   if clearOldConfigData then
@@ -470,8 +481,8 @@ end
 
 --#region Clean up
 do
-  local characterKeepThreshold = GetServerTime() - 30*24*60*60 -- 30 days
-  --local droptimizerKeepTime = GetServerTime() - 30*24*60*60 -- 30 days
+  local characterKeepThreshold = GetServerTime() - ns.config.droptimizerKeepTime -- 14 days
+  local droptimizerKeepThreshold = GetServerTime() - ns.config.droptimizerKeepTime
   local toDelete = {}
   for k,v in pairs(WowUtilsDB.others) do
     if (v.lastUpdateReceived or 0) < characterKeepThreshold then
@@ -480,6 +491,31 @@ do
   end
   for k,v in pairs(toDelete) do
     WowUtilsDB.others[k] = nil
+  end
+  wipe(toDelete)
+  -- only the character running the data addon ever imports, so everyone else depends on this
+  -- sweep to shed droptimizers that stopped being updated. every client runs the same rule
+  -- against the same timestamps, so they converge without any extra messages.
+  for key, data in pairs(WowUtilsDB.droptimizerData) do
+    if data.specs then
+      for specId, sims in pairs(data.specs) do
+        for simId, simData in pairs(sims) do
+          if (simData.simmedAt or 0) < droptimizerKeepThreshold then
+            sims[simId] = nil
+          end
+        end
+        if not next(sims) then
+          data.specs[specId] = nil
+        end
+      end
+    end
+    if (data.lastUpdate or 0) < droptimizerKeepThreshold then
+      toDelete[key] = true
+    end
+  end
+  for k in pairs(toDelete) do
+    ns.Debug.print("removing stale droptimizer data for '%s'", k)
+    WowUtilsDB.droptimizerData[k] = nil
   end
   C_MythicPlus.RequestMapInfo()
   local currentSeason = C_MythicPlus.GetCurrentSeason()
@@ -497,3 +533,4 @@ do
   end
 end
 --#end region
+db.dbVersion = ns.config.currentDBVersion
