@@ -22,6 +22,7 @@ communication.lua
 currency.lua
 items.lua
 events.lua
+tooltip.lua
 rclc.lua
 dataImport.lua
 gui.lua

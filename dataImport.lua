@@ -193,6 +193,7 @@ function private.ParseWishlistItems(d, wishlistMapping)
       equipmentSlot = private.GetEquipmentSlotId(v.slot),
       itemId = v.itemId,
       priority = wishlistMapping and wishlistMapping[tostring(v.priority)] or tostring(v.priority),
+      priorityId = tonumber(v.priority),
       updated = v.updatedAt,
       note = v.note
     }

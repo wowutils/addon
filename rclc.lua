@@ -6,6 +6,7 @@ local addon_name, ns = ...
 local sformat, tconcat = string.format, table.concat
 local moduleName = "WowUtilsRCLC"
 local columnName = "wowutils"
+local wishlistColumnName = "wishlist"
 ---@class wowutils_rclc
 ns.rclc = {}
 local private = {}
@@ -85,7 +86,7 @@ do
       itemId = itemId,
       itemClassId = _item.typeID,
       itemSubClassId = _item.subTypeID,
-      invSlotId = _item.equipLoc,
+      invSlotId = ns.helpers.GetInventorySlotByEquipLoc(_item.equipLoc),
       watermarkSlot = C_ItemUpgrade.GetHighWatermarkSlotForItem(_item.link)
     }
     return itemLinkDataCache[_item.link]
@@ -111,38 +112,6 @@ do
     return instanceDifToItemTrack[instanceDif] == itemTrack
   end
 
-  ---@class DroptimizerLine
-  ---@field tooltipLine string
-  ---@field percentileDif number
-
-  ---@class DroptimizerFormated
-  ---@field simmedAt number
-  ---@field displayName string
-  ---@field items DroptimizerLine[]
-
-  ---@param simData wowutilsDroptimizerData_sims
-  ---@param itemInfo CurrentItemInfo
-  ---@param itemData wowutilsDroptimizerData_droptimizerItem
-  ---@param itemId number
-  ---@return DroptimizerLine?
-  local function getDroptimizerLine(simData, itemInfo, itemData, itemId)
-    local isSame = itemInfo.itemId == itemId
-    local itemName = C_Item.GetItemNameByID(itemId) or UNKNOWN -- just force user to mouseover it again, cba to do caching, at least for now TODO maybe do it later on?
-    local itemIcon = select(5, GetItemInfoInstant(itemId))
-    if not simData.baseline then                               -- qelive
-      return {
-        tooltipLine = sformat("%s%.2f%% |T%d:0|t%s", isSame and ">>> " or "", itemData.gainPercent, itemIcon, itemName),
-        percentileDif = itemData.gainPercent,
-      }
-    else
-      local percentile = (itemData.gain / simData.baseline) * 100
-      return {
-        tooltipLine = sformat("%s%s (%.2f%%) |T%d:0|t%s", isSame and ">>> " or "", itemData.gain or UNKNOWN, percentile,
-          itemIcon, itemName),
-        percentileDif = percentile,
-      }
-    end
-  end
   local simlineColors = {
     neutral = { 1, 1, 1 },
     loss = { .92, .5, 0 },
@@ -158,36 +127,6 @@ do
     return simlineColors.loss
   end
 
-  ---@param itemTrack any
-  ---@param data table<number, wowutils_currencyData>
-  ---@return table
-  local function formatCurrencyLine(itemTrack, data)
-    if not currencyData[itemTrack] then return { "Error", 1, 0, 0 } end
-    if not data then ns.Debug.print("no 'data'") return { "No Data/No Data", .92, .5, 0 } end
-    local playerCurrency = data[currencyData[itemTrack].currencyId]
-    if not playerCurrency then
-      ns.Debug.print("no 'playercurrency'")
-      return { currencyData[itemTrack].format:format("No Data", "No Data"), .92, .5, 0 }
-    end
-    ---@cast playerCurrency wowutils_currencyData
-    return { currencyData[itemTrack].format:format(playerCurrency.current or 0, playerCurrency.totalEarned or 0), 1, 1, 1 }
-  end
-
-  ---@param wlItem wowutilsDroptimizerData_wishlistItem
-  ---@param itemId number
-  ---@param tooltip GameTooltip
-  local function addWishlistLine(wlItem, itemId, tooltip)
-    local itemName = C_Item.GetItemNameByID(wlItem.itemId) or UNKNOWN -- just force user to mouseover it again, cba to do caching, at least for now TODO maybe do it later on?
-    local itemIcon = select(5, GetItemInfoInstant(wlItem.itemId))
-    if wlItem.itemId == itemId then
-      tooltip:AddDoubleLine(sformat(">>>|T%d:0|t%s", itemIcon, itemName),
-        ns.helpers.GetFormatedLastUpdateTime(wlItem.updated), 0, 1, .25)
-    else
-      tooltip:AddDoubleLine(sformat("|T%d:0|t%s", itemIcon, itemName),
-        ns.helpers.GetFormatedLastUpdateTime(wlItem.updated), 1, 1, 1)
-    end
-    tooltip:AddLine(sformat("    Priotity: %s - Note: %s", wlItem.priority, wlItem.note or "N/A"), 1, 1, 1, true)
-  end
   do
     local qeLiveMatchStr = "0%-1$"
     local raidbotsMatchStr = "patchwerk%-1$"
@@ -233,136 +172,238 @@ do
       return bestItem, bestDif and getSimLineColor(bestDif) or nil
     end
   end
+  ---What the player picked for the viewed item on the website: the group's own tier label
+  ---(already resolved from `wishlistMapping` at import), matched on the exact item at the
+  ---difficulty being looted. Same-slot-but-other-item picks stay in the tooltip only.
+  ---@param droptimizerKey string
+  ---@param entryItem table? rclc item entry
+  ---@return string? label
+  ---@return wowutilsDroptimizerData_wishlistItem? pick
+  function private.findWishlistPickForWindow(droptimizerKey, entryItem)
+    local itemInfo = getItemInfo(entryItem)
+    if not itemInfo then return nil end
+    local droptimizerData = WowUtilsDB.droptimizerData[droptimizerKey]
+    if not droptimizerData then return nil end
+    for _, wlItem in pairs(droptimizerData.wishlist) do
+      if wlItem.itemId == itemInfo.itemId and isCorrectDif(wlItem.difficultyId, itemInfo.itemTrack) then
+        return wlItem.priority, wlItem
+      end
+    end
+    return nil
+  end
   local function isMatchingSlot(slot1, slot2)
     if slot1 == slot2 then return true end
     return ns.helpers.GetUniversalSlot(slot1) == ns.helpers.GetUniversalSlot(slot2)
   end
-  ---@param guid string
+  local trackNames = {
+    [ns.enums.itemTrack.adventurer] = "Adventurer",
+    [ns.enums.itemTrack.veteran] = "Veteran",
+    [ns.enums.itemTrack.champion] = "Champion",
+    [ns.enums.itemTrack.hero] = "Hero",
+    [ns.enums.itemTrack.myth] = "Myth",
+  }
+  local sourceNames = {
+    [ns.enums.simTypes.raidbotDroptimizer] = "RB",
+    [ns.enums.simTypes.qeLiveDroptimizer] = "QE",
+  }
+
+  ---"mythic-max" -> "Mythic max", "raid-vault-mythic" -> "Raid vault mythic"
+  ---@param key string
+  ---@return string
+  local function prettyKey(key)
+    local words = key:gsub("[-_]", " ")
+    return words:sub(1, 1):upper() .. words:sub(2)
+  end
+
+  ---simKey is "<simType>-<profileKey>-<fightStyle or 0>-<targets>" as written by dataImport.
+  ---@param simKey string
+  ---@return string source
+  ---@return string profile
+  ---@return string targets
+  local function parseSimKey(simKey)
+    local simType, rest = simKey:match("^(%d+)%-(.*)$")
+    local source = sourceNames[tonumber(simType)] or "?"
+    local profile, fightStyle, targets = (rest or simKey):match("^(.-)%-([^-]*)%-(%d+)$")
+    if not profile then return source, rest or simKey, "" end
+    local style = fightStyle ~= "0" and prettyKey(fightStyle) or nil
+    local targetText = targets == "1" and "1 target" or (targets .. " targets")
+    return source, prettyKey(profile), style and sformat("%s · %s", style, targetText) or targetText
+  end
+
+  ---Gain text + percentile for one simmed item, whichever sim source produced it.
+  ---@param simData wowutilsDroptimizerData_sims
+  ---@param itemData wowutilsDroptimizerData_droptimizerItem
+  ---@return string gainText absolute gain, "" when the source only carries a percentage
+  ---@return string pctText
+  ---@return number percentile
+  local function formatGain(simData, itemData)
+    if not simData.baseline then -- qelive
+      local pct = itemData.gainPercent or 0
+      return "", sformat("%+.2f%%", pct), pct
+    end
+    local pct = ((itemData.gain or 0) / simData.baseline) * 100
+    return sformat("%+.0f", itemData.gain or 0), sformat("%+.2f%%", pct), pct
+  end
+
+  ---@param wlItem wowutilsDroptimizerData_wishlistItem
+  ---@return wowutils_tooltip_pick
+  local function pickOf(wlItem)
+    return {
+      itemId = wlItem.itemId,
+      label = wlItem.priority,
+      priorityId = wlItem.priorityId,
+      updated = wlItem.updated,
+      note = wlItem.note,
+    }
+  end
+
+  ---Everything the candidate card shows for one candidate and the item being viewed.
+  ---@param guid string?
   ---@param droptimizerKey string
-  ---@param tooltip GameTooltip
-  ---@param entryItem table? entry item  from rclc
-  function ns.rclc.AddDataToTooltip(guid, droptimizerKey, tooltip, entryItem)
+  ---@param candidateName string name-realm as rclc stores it
+  ---@param entryItem table? rclc item entry, defaults to the current voting session's item
+  ---@return wowutils_tooltip_model?
+  function ns.rclc.BuildCandidateModel(guid, droptimizerKey, candidateName, entryItem)
     local itemInfo = getItemInfo(entryItem)
-    if not itemInfo then return end
+    if not itemInfo then return nil end
     local droptimizerData = WowUtilsDB.droptimizerData[droptimizerKey]
-    ns.Debug.AddToDevTool({ itemInfo = itemInfo, droptimizerData = droptimizerData }, "ns.rclc.AddDataToTooltip")
+    ns.Debug.AddToDevTool({ itemInfo = itemInfo, droptimizerData = droptimizerData }, "ns.rclc.BuildCandidateModel")
+
+    local shortName, realm = strsplit("-", candidateName)
+    local classFile = UnitClassBase(Ambiguate(candidateName, "none"))
+    if not classFile and droptimizerData and droptimizerData.class and droptimizerData.class > 0 then
+      classFile = select(2, GetClassInfo(droptimizerData.class))
+    end
+    local _, _, _, equipLoc, icon = GetItemInfoInstant(itemInfo.itemLink)
+    local ilvl = C_Item.GetDetailedItemLevelInfo(itemInfo.itemLink)
+    local subtitle = {}
+    if equipLoc and _G[equipLoc] then tinsert(subtitle, _G[equipLoc]) end
+    if ilvl then tinsert(subtitle, tostring(ilvl)) end
+    if trackNames[itemInfo.itemTrack] then tinsert(subtitle, trackNames[itemInfo.itemTrack]) end
+
+    ---@type wowutils_tooltip_model
+    local m = {
+      item = {
+        itemId = itemInfo.itemId,
+        name = C_Item.GetItemNameByID(itemInfo.itemId) or UNKNOWN,
+        icon = icon or 134400,
+        subtitle = tconcat(subtitle, "  ·  "),
+      },
+      candidate = { name = shortName or candidateName, realm = realm, classFile = classFile },
+      otherPicks = {},
+      sims = {},
+      others = {},
+      noPlayerData = false,
+    }
+
     if droptimizerData then
-      -- wishlist
-      local alreadyAddedTitle = false
+      -- Wishlist: the viewed item first, then other picks in the same slot at this difficulty.
       for _, wlItem in pairs(droptimizerData.wishlist) do
-        --print(wlItem.equipmentSlot, itemInfo.equipmentSlot, isMatchingSlot(wlItem.equipmentSlot, itemInfo.equipmentSlot),  isCorrectDif(Item.difficultyId, itemInfo.itemTrack))
         if isMatchingSlot(wlItem.equipmentSlot, itemInfo.invSlotId) and isCorrectDif(wlItem.difficultyId, itemInfo.itemTrack) then
-        --if isCorrectDif(wlItem.difficultyId, itemInfo.itemTrack) then
-          if not alreadyAddedTitle then
-            tooltip:AddLine("Wishlist")
-            alreadyAddedTitle = true
+          if wlItem.itemId == itemInfo.itemId then
+            m.viewedPick = pickOf(wlItem)
+          else
+            tinsert(m.otherPicks, pickOf(wlItem))
           end
-          addWishlistLine(wlItem, itemInfo.itemId, tooltip)
         end
       end
-      ---@type DroptimizerFormated[]
-      local allSims = {}
+
+      -- Droptimizers: one row per sim for the viewed item; every other same-slot item
+      -- collapses to its single best result across all sims.
+      ---@type table<number, wowutils_tooltip_otherRow>
+      local bestOther = {}
       for specId, sims in pairs(droptimizerData.specs) do
         for simKey, simData in pairs(sims) do
-          local items = {}
-          local foundItem = false
-          for itemId, itemData in ns.helpers.spairs(simData.items, function(t, a, b)
-            ---@cast t table<number, wowutilsDroptimizerData_droptimizerItem>
-            if simData.baseline then
-              return t[a].gain > t[b].gain
-            else -- qelive
-              return (t[a].gainPercent or 0) > (t[b].gainPercent or 0)
-            end
-          end) do
+          local source, profile, targets
+          for itemId, itemData in pairs(simData.items) do
             ---@cast itemData wowutilsDroptimizerData_droptimizerItem
             if isMatchingSlot(itemInfo.invSlotId, itemData.equipmentSlot) and isCorrectDif(itemData.difficultyId, itemInfo.itemTrack) then
-              --[[ if itemInfo.itemId == itemId then
-                foundItem = true
-              end --]]
-              local itemLine = getDroptimizerLine(simData, itemInfo, itemData, itemId)
-              if itemLine then
-                tinsert(items, itemLine)
+              if not source then source, profile, targets = parseSimKey(simKey) end
+              local gainText, pctText, pct = formatGain(simData, itemData)
+              if itemId == itemInfo.itemId then
+                tinsert(m.sims, {
+                  specId = specId,
+                  source = source,
+                  profile = profile,
+                  targets = targets,
+                  simmedAt = simData.simmedAt,
+                  gainText = gainText,
+                  pctText = pctText,
+                  pct = pct,
+                })
+              elseif not bestOther[itemId] or bestOther[itemId].pct < pct then
+                bestOther[itemId] = { itemId = itemId, simLabel = profile, gainText = gainText, pctText = pctText, pct = pct }
               end
             end
           end
-          if #items > 0 then
-            --if foundItem and #items > 0 then
-            local substring = simKey:sub(3)
-            local simType = simKey:sub(1, 1)
-            ---@diagnostic disable-next-line: cast-local-type
-            simType = tonumber(simType)
-            local simDisplayName = sformat("%s%s-%s", ns.helpers.GetIconTextureStringForSpecId(specId),
-              simType == ns.enums.simTypes.qeLiveDroptimizer and "QeLive" or
-              simType == ns.enums.simTypes.raidbotDroptimizer and "RaidBots" or UNKNOWN, substring)
-            tinsert(allSims, {
-              displayName = simDisplayName,
-              items = items,
-              simmedAt = simData.simmedAt,
-            })
-          end
         end
       end
-      if #allSims > 0 then
-        for _, sim in ns.helpers.spairs(allSims, function(t, a, b) return t[a].simmedAt > t[b].simmedAt end) do
-          ---@cast sim DroptimizerFormated
-          tooltip:AddDoubleLine(sim.displayName, ns.helpers.GetFormatedLastUpdateTime(sim.simmedAt))
-          for _, simItem in ns.helpers.spairs(sim.items, function(t, a, b)
-            return t[a].percentileDif > t[b].percentileDif
-          end) do
-            ---@cast simItem DroptimizerLine
-            tooltip:AddLine(simItem.tooltipLine, unpack(getSimLineColor(simItem.percentileDif)))
-          end
-        end
-      end
+      table.sort(m.sims, function(x, y) return x.pct > y.pct end)
+      for _, row in pairs(bestOther) do tinsert(m.others, row) end
+      table.sort(m.others, function(x, y) return x.pct > y.pct end)
+      local maxOther = 6
+      while #m.others > maxOther do tremove(m.others) end
     end
 
     local playerData
-    if guid == ns.me.guid then
+    if guid and guid == ns.me.guid then
       playerData = WowUtilsDB.ownCharacters[guid]
-    else
+    elseif guid then
       playerData = WowUtilsDB.others[guid]
     end
-    if playerData then
-      --local itemUpgradeInfo  = C_Item.GetItemUpgradeInfo(itemInfo.itemLink)
-      tooltip:AddDoubleLine("Currency", ns.helpers.GetFormatedLastUpdateTime(playerData.dataRefreshTimes and playerData.dataRefreshTimes.currency or playerData.currencyUpdated))
-      ns.helpers.AddTooltipSeparator(tooltip)
-      if itemInfo.itemTrack == ns.enums.itemTrack.none then
-        tooltip:AddLine(unpack(formatCurrencyLine(ns.enums.itemTrack.myth, playerData.currency)))
-        tooltip:AddLine(unpack(formatCurrencyLine(ns.enums.itemTrack.hero, playerData.currency)))
-        tooltip:AddLine(unpack(formatCurrencyLine(ns.enums.itemTrack.champion, playerData.currency)))
-        tooltip:AddLine(unpack(formatCurrencyLine(ns.enums.itemTrack.veteran, playerData.currency)))
-        tooltip:AddLine(unpack(formatCurrencyLine("convert", playerData.currency)))
-        tooltip:AddLine(unpack(formatCurrencyLine("bonusCoin", playerData.currency)))
-      else
-        tooltip:AddLine(unpack(formatCurrencyLine(itemInfo.itemTrack, playerData.currency)))
-        tooltip:AddLine(unpack(formatCurrencyLine("convert", playerData.currency)))
-        tooltip:AddLine(unpack(formatCurrencyLine("bonusCoin", playerData.currency)))
-      end
-      if itemInfo.watermarkSlot then
-        tooltip:AddDoubleLine("Free updagre up to:", ns.helpers.GetFormatedLastUpdateTime(playerData.dataRefreshTimes and playerData.dataRefreshTimes.watermarks or playerData.watermarksUpdated or 0))
-        if playerData.watermarks then
-          if weaponSlots[itemInfo.watermarkSlot] then
-            tooltip:AddLine(
-              sformat("MainhandWeapon %s", playerData.watermarks[Enum.ItemRedundancySlot.MainhandWeapon] or 0), 1, 1, 1)
-            tooltip:AddLine(sformat("Offhand %s", playerData.watermarks[Enum.ItemRedundancySlot.Offhand] or 0), 1, 1, 1)
-            tooltip:AddLine(
-              sformat("OnehandWeapon %s", playerData.watermarks[Enum.ItemRedundancySlot.OnehandWeapon] or 0), 1, 1, 1)
-            tooltip:AddLine(
-              sformat("OnehandWeaponSecond %s", playerData.watermarks[Enum.ItemRedundancySlot.OnehandWeaponSecond] or 0),
-              1,
-              1, 1)
-            tooltip:AddLine(sformat("Twohand %s", playerData.watermarks[Enum.ItemRedundancySlot.Twohand] or 0), 1, 1, 1)
-          else
-            ---@diagnostic disable-next-line: param-type-mismatch
-            tooltip:AddLine(playerData.watermarks[itemInfo.watermarkSlot] or 0, 1, 1, 1)
-          end
-        else
-          tooltip:AddLine("No watermark data", .92, .5, 0)
-        end
-      end
-    else
-      tooltip:AddLine("No player data", .92, .5, 0)
+    if not playerData then
+      m.noPlayerData = true
+      return m
     end
+
+    m.crestsUpdated = playerData.dataRefreshTimes and playerData.dataRefreshTimes.currency or playerData.currencyUpdated
+    m.crests = {}
+    local tracks
+    if itemInfo.itemTrack == ns.enums.itemTrack.none then
+      tracks = { ns.enums.itemTrack.myth, ns.enums.itemTrack.hero, ns.enums.itemTrack.champion, ns.enums.itemTrack.veteran, "convert", "bonusCoin" }
+    else
+      tracks = { itemInfo.itemTrack, "convert", "bonusCoin" }
+    end
+    for _, track in ipairs(tracks) do
+      local cd = currencyData[track]
+      if cd then
+        local ci = C_CurrencyInfo.GetCurrencyInfo(cd.currencyId)
+        local pc = playerData.currency and playerData.currency[cd.currencyId]
+        tinsert(m.crests, {
+          icon = ci and ci.iconFileID or 134400,
+          current = pc and pc.current or 0,
+          earned = pc and pc.totalEarned or 0,
+        })
+      end
+    end
+
+    if itemInfo.watermarkSlot then
+      m.watermarksUpdated = playerData.dataRefreshTimes and playerData.dataRefreshTimes.watermarks or playerData.watermarksUpdated or 0
+      m.watermarks = {}
+      local wm = playerData.watermarks or {}
+      if weaponSlots[itemInfo.watermarkSlot] then
+        tinsert(m.watermarks, { label = "Main hand", value = wm[Enum.ItemRedundancySlot.MainhandWeapon] or 0 })
+        tinsert(m.watermarks, { label = "Off hand", value = wm[Enum.ItemRedundancySlot.Offhand] or 0 })
+        tinsert(m.watermarks, { label = "One-hand", value = wm[Enum.ItemRedundancySlot.OnehandWeapon] or 0 })
+        tinsert(m.watermarks, { label = "One-hand (second)", value = wm[Enum.ItemRedundancySlot.OnehandWeaponSecond] or 0 })
+        tinsert(m.watermarks, { label = "Two-hand", value = wm[Enum.ItemRedundancySlot.Twohand] or 0 })
+      else
+        tinsert(m.watermarks, { label = "This slot", value = wm[itemInfo.watermarkSlot] or 0 })
+      end
+    end
+    return m
+  end
+
+  ---Shows the candidate card at the cursor for the owner widget being hovered.
+  ---@param owner Frame
+  ---@param guid string?
+  ---@param droptimizerKey string
+  ---@param candidateName string
+  ---@param entryItem table?
+  function ns.rclc.ShowCandidateCard(owner, guid, droptimizerKey, candidateName, entryItem)
+    local model = ns.rclc.BuildCandidateModel(guid, droptimizerKey, candidateName, entryItem)
+    if not model then return end
+    ns.tooltip.Show(owner, model)
   end
 end
 
@@ -378,8 +419,17 @@ function rclcMod:InitialSetup()
   self:Hook(ns.rclc.votingWindow, "SwitchSession", function(_, _sessionId) session = _sessionId end)
   self:SecureHook(ns.rclc.actualAddon, "OnLootTableReceived", ns.rclc.OnLootTableReceived)
   --self.sortNext = {}
+  -- Response (what they picked on the site) sits left of the number (sim gain).
   table.insert(ns.rclc.votingWindow.scrollCols, {
-    name = columnName,
+    name = "Wishlist",
+    align = "CENTER",
+    width = 110,
+    pos = #ns.rclc.votingWindow.scrollCols + 1,
+    DoCellUpdate = self.UpdateWishlistCell,
+    colName = wishlistColumnName,
+  })
+  table.insert(ns.rclc.votingWindow.scrollCols, {
+    name = "WowUtils",
     align = "CENTER",
     width = 100,
     pos = #ns.rclc.votingWindow.scrollCols + 1,
@@ -452,26 +502,40 @@ function rclcMod:GetScrollColIndexFromName(name)
   return ns.rclc.votingWindow:GetColumnIndexFromName(name)
 end
 
-function rclcMod.UpdateMainModCell(rowFrame, frame, data, cols, row, realrow, column, fShow, table, ...)
-  local name = data[realrow].name
+---@param name string candidate name as rclc stores it (name-realm)
+---@return string? guid
+---@return string droptimizerKey
+local function getRowKeys(name)
   local guid = UnitGUID(Ambiguate(name, "none"))
   local n, s = strsplit("-", name)
-  local droptimizerKey = sformat("%s-%s", n:lower(), ns.GetRealmId(nil, s))
+  return guid, sformat("%s-%s", n:lower(), ns.GetRealmId(nil, s))
+end
+
+---Hover on any of our cells shows the full per-candidate breakdown for the viewed item.
+local function attachRowTooltip(frame, name, guid, droptimizerKey)
   frame:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
-    local unitClassBase = UnitClassBase(Ambiguate(name, "none"))
-    local classColor = C_ClassColor.GetClassColor(unitClassBase)
-    GameTooltip:AddLine(classColor and classColor:WrapTextInColorCode(name) or name)
-    if guid and droptimizerKey then
-      ns.rclc.AddDataToTooltip(guid, droptimizerKey, GameTooltip)
-    else
-      GameTooltip:AddLine("Error.", 1, 0, 0)
-    end
-    GameTooltip:Show()
+    ns.rclc.ShowCandidateCard(self, guid, droptimizerKey, name)
   end)
-  frame:SetScript("OnLeave", function()
-    GameTooltip:Hide()
-  end)
+  frame:SetScript("OnLeave", ns.tooltip.Hide)
+end
+
+function rclcMod.UpdateWishlistCell(rowFrame, frame, data, cols, row, realrow, column, fShow, table, ...)
+  local name = data[realrow].name
+  local guid, droptimizerKey = getRowKeys(name)
+  attachRowTooltip(frame, name, guid, droptimizerKey)
+  local label = private.findWishlistPickForWindow(droptimizerKey)
+  -- lib-st sizes the cell text to the column width; with wrapping off the client
+  -- ellipsizes anything wider, which covers arbitrary site labels safely.
+  frame.text:SetWordWrap(false)
+  frame.text:SetNonSpaceWrap(false)
+  frame.text:SetText(label or "---")
+  frame.text:SetTextColor(1, 1, 1)
+end
+
+function rclcMod.UpdateMainModCell(rowFrame, frame, data, cols, row, realrow, column, fShow, table, ...)
+  local name = data[realrow].name
+  local guid, droptimizerKey = getRowKeys(name)
+  attachRowTooltip(frame, name, guid, droptimizerKey)
   --[[
   local f = frame.wowutilsButton
   if not f then
@@ -543,13 +607,9 @@ function lootPopup.HandleEntry(entry)
     b:SetPoint("TOPRIGHT", entry.frame, "TOPRIGHT", -5, -5)
     b:SetNormalTexture(ns.logoFile)
     b:SetScript("OnEnter", function(self)
-      GameTooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT")
-      ns.rclc.AddDataToTooltip(ns.me.guid, ns.me.droptimizerKey, GameTooltip, entry.item)
-      GameTooltip:Show()
+      ns.rclc.ShowCandidateCard(self, ns.me.guid, ns.me.droptimizerKey, ns.me.name, entry.item)
     end)
-    b:SetScript("OnLeave", function()
-      GameTooltip:Hide()
-    end)
+    b:SetScript("OnLeave", ns.tooltip.Hide)
     --[[
     b:SetScript("OnClick", function()
       ns.Debug.print("OnClick")
