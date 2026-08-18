@@ -480,12 +480,26 @@ function ns.tooltip.Show(owner, m)
   y = otherOptions(m, y)
   y = crests(m, y)
   card:SetHeight(-y + PAD - GAP)
-  card:ClearAllPoints()
-  local scale = UIParent:GetEffectiveScale()
-  local cx, cy = GetCursorPosition()
-  card:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", cx / scale + 16, cy / scale - 8)
+  ns.tooltip.PlaceAtCursor()
   card.owner = owner
   card:Show()
+end
+
+---Anchors the card beside the cursor without ever covering what is being hovered:
+---above and to the right by default, flipping below / to the left when the screen runs out.
+function ns.tooltip.PlaceAtCursor()
+  local scale = UIParent:GetEffectiveScale()
+  local cx, cy = GetCursorPosition()
+  cx, cy = cx / scale, cy / scale
+  local screenW, screenH = UIParent:GetWidth(), UIParent:GetHeight()
+  local w, h = card:GetWidth(), card:GetHeight()
+  local dx, dy = 18, 14 -- keeps the cursor's own row (and the cell under it) clear
+  local side, edge = "LEFT", "BOTTOM"
+  local x, y = cx + dx, cy + dy
+  if cx + dx + w > screenW then side = "RIGHT"; x = cx - dx end
+  if cy + dy + h > screenH then edge = "TOP"; y = cy - dy end
+  card:ClearAllPoints()
+  card:SetPoint(edge .. side, UIParent, "BOTTOMLEFT", x, y)
 end
 
 function ns.tooltip.Hide()
