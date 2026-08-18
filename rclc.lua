@@ -233,15 +233,16 @@ do
   ---Gain text + percentile for one simmed item, whichever sim source produced it.
   ---@param simData wowutilsDroptimizerData_sims
   ---@param itemData wowutilsDroptimizerData_droptimizerItem
-  ---@return string text
+  ---@return string gainText absolute gain, "" when the source only carries a percentage
+  ---@return string pctText
   ---@return number percentile
   local function formatGain(simData, itemData)
-    if not simData.baseline then -- qelive only carries a percentage
+    if not simData.baseline then -- qelive
       local pct = itemData.gainPercent or 0
-      return sformat("%+.2f%%", pct), pct
+      return "", sformat("%+.2f%%", pct), pct
     end
     local pct = ((itemData.gain or 0) / simData.baseline) * 100
-    return sformat("%+.0f  %.2f%%", itemData.gain or 0, pct), pct
+    return sformat("%+.0f", itemData.gain or 0), sformat("%+.2f%%", pct), pct
   end
 
   ---@param wlItem wowutilsDroptimizerData_wishlistItem
@@ -318,7 +319,7 @@ do
             ---@cast itemData wowutilsDroptimizerData_droptimizerItem
             if isMatchingSlot(itemInfo.invSlotId, itemData.equipmentSlot) and isCorrectDif(itemData.difficultyId, itemInfo.itemTrack) then
               if not source then source, profile, targets = parseSimKey(simKey) end
-              local gainText, pct = formatGain(simData, itemData)
+              local gainText, pctText, pct = formatGain(simData, itemData)
               if itemId == itemInfo.itemId then
                 tinsert(m.sims, {
                   specId = specId,
@@ -327,10 +328,11 @@ do
                   targets = targets,
                   simmedAt = simData.simmedAt,
                   gainText = gainText,
+                  pctText = pctText,
                   pct = pct,
                 })
               elseif not bestOther[itemId] or bestOther[itemId].pct < pct then
-                bestOther[itemId] = { itemId = itemId, simLabel = profile, gainText = gainText, pct = pct }
+                bestOther[itemId] = { itemId = itemId, simLabel = profile, gainText = gainText, pctText = pctText, pct = pct }
               end
             end
           end

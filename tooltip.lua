@@ -37,13 +37,15 @@ ns.tooltip = {}
 ---@field profile string
 ---@field targets string
 ---@field simmedAt number
----@field gainText string
+---@field gainText string absolute gain, "" for percent-only sources
+---@field pctText string
 ---@field pct number
 
 ---@class wowutils_tooltip_otherRow
 ---@field itemId number
 ---@field simLabel string
 ---@field gainText string
+---@field pctText string
 ---@field pct number
 
 ---@class wowutils_tooltip_crest
@@ -89,9 +91,11 @@ local PRIORITY_COLORS = {
   [5] = { 0.893, 0.346, 0.346 },
 }
 
-local W, PAD, ROW, GAP, EYEBROW = 460, 14, 18, 10, 16
+local W, PAD, ROW, GAP, EYEBROW = 500, 14, 18, 10, 16
 local ICON = 16
-local VALUE_W, AGE_W, BAR_W = 96, 34, 72
+-- right-hand ledger columns, measured from the card's right padding inward
+local PCT_W, GAIN_W, BAR_W, AGE_W, COL_GAP = 52, 52, 56, 26, 10
+local LEDGER_W = PCT_W + COL_GAP + GAIN_W + COL_GAP + BAR_W + COL_GAP + AGE_W
 
 local function makeFont(name, file, size, flags)
   local f = CreateFont(name)
@@ -257,18 +261,44 @@ local function chipRight(rightX, y, label, color)
   return w
 end
 
----Right-aligned mono value with a proportional bar seated behind it.
-local function valueWithBar(y, gainText, pct, maxAbs)
+---The ledger's right-hand columns: age | gain bar | absolute gain | percent, all right-aligned.
+---@param y number
+---@param ageText string?
+---@param gainText string
+---@param pctText string
+---@param pct number
+---@param maxAbs number largest |pct| in the section, scales the bar
+local function ledgerColumns(y, ageText, gainText, pctText, pct, maxAbs)
   local col = pct >= 0 and COLORS.gain or COLORS.loss
-  if maxAbs and maxAbs > 0 and pct ~= 0 then
-    local bar = tex("BORDER")
-    bar:SetColorTexture(col[1], col[2], col[3], 0.18)
-    bar:SetSize(math.max(2, BAR_W * math.min(1, math.abs(pct) / maxAbs)), ROW - 5)
-    bar:SetPoint("TOPRIGHT", card, "TOPRIGHT", -PAD, y - 2)
+  local right = -PAD
+  local pctFs = text(FONTS.mono, pctText, rgb(col))
+  pctFs:SetJustifyH("RIGHT")
+  pctFs:SetWidth(PCT_W)
+  pctFs:SetPoint("TOPRIGHT", card, "TOPRIGHT", right, y - 2)
+  right = right - PCT_W - COL_GAP
+  local gainFs = text(FONTS.mono, gainText, rgb(COLORS.fg))
+  gainFs:SetJustifyH("RIGHT")
+  gainFs:SetWidth(GAIN_W)
+  gainFs:SetPoint("TOPRIGHT", card, "TOPRIGHT", right, y - 2)
+  right = right - GAIN_W - COL_GAP
+  -- lit fill on a dim track, growing from the left like the site's ledgers
+  local track = tex("BORDER")
+  track:SetColorTexture(1, 1, 1, 0.06)
+  track:SetSize(BAR_W, 4)
+  track:SetPoint("RIGHT", card, "TOPRIGHT", right, y - ROW / 2)
+  if maxAbs > 0 and pct ~= 0 then
+    local fill = tex("ARTWORK")
+    fill:SetColorTexture(col[1], col[2], col[3], 0.85)
+    fill:SetSize(math.max(2, BAR_W * math.min(1, math.abs(pct) / maxAbs)), 4)
+    fill:SetPoint("LEFT", track, "LEFT", 0, 0)
   end
-  local fs = text(FONTS.mono, gainText, rgb(col))
-  fs:SetJustifyH("RIGHT")
-  fs:SetPoint("TOPRIGHT", card, "TOPRIGHT", -PAD - 4, y - 2)
+  right = right - BAR_W - COL_GAP
+  if ageText then
+    local ageFs = text(FONTS.monoSmall, ageText, rgb(COLORS.dim))
+    ageFs:SetJustifyH("RIGHT")
+    ageFs:SetWidth(AGE_W)
+    ageFs:SetPoint("TOPRIGHT", card, "TOPRIGHT", right, y - 3)
+  end
 end
 
 local function itemNameOf(itemId)
@@ -367,15 +397,15 @@ local function droptimizer(m, y)
     x = x + ICON + 6
     local label = s.profile
     if mixedSource then label = sformat("%s  %s", s.source, label) end
+    local labelW = W - PAD * 2 - (x - PAD) - LEDGER_W - COL_GAP
     local fs = text(FONTS.body, label, rgb(COLORS.fg))
     fs:SetPoint("TOPLEFT", card, "TOPLEFT", x, y - 2)
-    fs:SetWidth(W - PAD * 2 - (x - PAD) - VALUE_W - AGE_W - 60)
+    local profileW = math.min(fs:GetStringWidth(), labelW)
+    fs:SetWidth(profileW)
     local tg = text(FONTS.small, s.targets, rgb(COLORS.muted))
-    tg:SetPoint("TOPLEFT", fs, "TOPLEFT", math.min(fs:GetStringWidth(), fs:GetWidth()) + 6, 0)
-    local ageFs = text(FONTS.monoSmall, age(s.simmedAt), rgb(COLORS.dim))
-    ageFs:SetJustifyH("RIGHT")
-    ageFs:SetPoint("TOPRIGHT", card, "TOPRIGHT", -PAD - VALUE_W, y - 3)
-    valueWithBar(y, s.gainText, s.pct, maxAbs)
+    tg:SetPoint("TOPLEFT", card, "TOPLEFT", x + profileW + 6, y - 3)
+    tg:SetWidth(math.max(0, labelW - profileW - 6))
+    ledgerColumns(y, age(s.simmedAt), s.gainText, s.pctText, s.pct, maxAbs)
     y = y - ROW
   end
   return y - GAP
@@ -389,13 +419,15 @@ local function otherOptions(m, y)
   for _, o in ipairs(m.others) do maxAbs = math.max(maxAbs, math.abs(o.pct)) end
   for _, o in ipairs(m.others) do
     plate(PAD, y - 1, ICON, itemIconOf(o.itemId), COLORS.border)
+    local labelW = W - PAD * 2 - ICON - 6 - LEDGER_W - COL_GAP
     local fs = text(FONTS.body, itemNameOf(o.itemId), rgb(COLORS.fg))
     fs:SetPoint("TOPLEFT", card, "TOPLEFT", PAD + ICON + 6, y - 2)
-    fs:SetWidth(170)
+    local nameW = math.min(fs:GetStringWidth(), labelW - 60)
+    fs:SetWidth(nameW)
     local sim = text(FONTS.small, o.simLabel, rgb(COLORS.muted))
-    sim:SetPoint("TOPLEFT", card, "TOPLEFT", PAD + ICON + 6 + 176, y - 3)
-    sim:SetWidth(W - PAD * 2 - ICON - 6 - 176 - VALUE_W - 8)
-    valueWithBar(y, o.gainText, o.pct, maxAbs)
+    sim:SetPoint("TOPLEFT", card, "TOPLEFT", PAD + ICON + 6 + nameW + 8, y - 3)
+    sim:SetWidth(math.max(0, labelW - nameW - 8))
+    ledgerColumns(y, nil, o.gainText, o.pctText, o.pct, maxAbs)
     y = y - ROW
   end
   return y - GAP
