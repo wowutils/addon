@@ -31,10 +31,6 @@ function ns.rclc.DataUpdated()
   ns.rclc.votingWindow:Update()
 end
 
-function RCLCT()
-  ns.rclc.DataUpdated()
-end
-
 do
   local currencyData = {}
   for i, mapIdToFind in pairs({
