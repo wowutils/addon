@@ -47,6 +47,7 @@ ns.config = {
       --isWeeklyQuest = true,
     --},
     --[95155] = {}, -- Nulleus ??, could actually be 95154
+    [97913] = {}, -- Midnight S2 Nemesis, educated guess, could also be 96417 or 96416
     [97910] = {}, -- Cracked Keystone (Midnight S2)
     [96410] = {}, -- Seeking Knowledge Week 1 of 5: The Omnium Folio
     [96441] = {}, -- Seeking Knowledge Week 2 of 5: Ritualized Arcana
