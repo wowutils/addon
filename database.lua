@@ -18,6 +18,14 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@field lastDataImport number?
 ---@field syncLists table<string, wowutilsSyncList>
 ---@field configVersion number
+---@field options wowutils_options
+
+---@class wowutils_options
+---@field characterFilters wowutils_options_characterFilters
+
+---@class wowutils_options_characterFilters
+---@field hideUntracked boolean? hide characters no synclist tracks
+---@field hideLowIlvl boolean? hide characters whose watermark median is below ns.config.guiIlvlFilter
 
 ---@class wowutilsSyncList
 ---@field lastUpdate number
@@ -152,6 +160,9 @@ WowUtilsDB = WowUtilsDB or {
   droptimizerData = {},
   lastSeenWeeklyReset = C_DateAndTime.GetWeeklyResetStartTime(),
   syncLists = {},
+  options = {
+    characterFilters = {},
+  },
 }
 
 if not WowUtilsDB.ownCharacters[ns.me.guid] then
@@ -190,6 +201,12 @@ else
 end
 if not WowUtilsDB.syncLists then
   WowUtilsDB.syncLists = {}
+end
+if not WowUtilsDB.options then -- added on 1.0.4, existing installs have no table yet
+  WowUtilsDB.options = { characterFilters = {} }
+end
+if not WowUtilsDB.options.characterFilters then
+  WowUtilsDB.options.characterFilters = {}
 end
 if not WowUtilsDB.droptimizerData then -- the cleanup sweep below walks this on every client now
   WowUtilsDB.droptimizerData = {}

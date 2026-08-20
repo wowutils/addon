@@ -82,6 +82,29 @@ local function CreateButton(parent, text, width, height)
   return button
 end
 
+---Checkbox with a muted label to its right, matching the button/tab styling.
+---@param parent Frame
+---@param text string
+---@param onClick fun(checked: boolean)
+local function CreateCheckbox(parent, text, onClick)
+  local check = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+  check:SetSize(22, 22)
+
+  local label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  label:SetPoint("LEFT", check, "RIGHT", 2, 1)
+  label:SetText(text)
+  label:SetTextColor(unpack(COLORS.muted))
+  check.label = label
+
+  check:SetScript("OnEnter", function() label:SetTextColor(unpack(COLORS.text)) end)
+  check:SetScript("OnLeave", function() label:SetTextColor(unpack(COLORS.muted)) end)
+  check:SetScript("OnClick", function(self)
+    onClick(self:GetChecked() and true or false)
+  end)
+
+  return check
+end
+
 ---Underline style tab, the active one gets an accent bar and brighter text.
 ---@param parent Frame
 ---@param text string
@@ -236,6 +259,55 @@ local function ApplyRowStyle(row, classValue, index)
     row.name:SetTextColor(unpack(COLORS.text))
   end
 end
+---Median over every slot we have a watermark for. Slots the character can't fill (offhand on a
+---two-hander, and anything at or below ns.config.watermarks.startingPoint once it has been through
+---the wire encoding) are stored as 0, and they belong in the median - a character who is only geared
+---in a handful of slots should read as low, not as the average of the slots they did upgrade.
+---@param watermarks table<number, number>?
+---@return number? median nil when the character has no watermark data at all
+local function GetWatermarkMedian(watermarks)
+  if type(watermarks) ~= "table" then
+    return nil
+  end
+
+  local values = {}
+  for _, ilvl in pairs(watermarks) do
+    values[#values + 1] = ilvl or 0
+  end
+  if #values == 0 then
+    return nil
+  end
+
+  table.sort(values)
+  local half = #values / 2
+  if #values % 2 == 1 then
+    return values[floor(half) + 1]
+  end
+  return (values[half] + values[half + 1]) / 2
+end
+
+---Roster filters, both stored on WowUtilsDB.options.characterFilters so they survive a reload. They
+---stack: a character is dropped as soon as any enabled filter matches it.
+---@param entry table
+---@return boolean
+local function IsFilteredOut(entry)
+  local filters = WowUtilsDB.options and WowUtilsDB.options.characterFilters or {}
+
+  if filters.hideUntracked and not (entry.syncLists and #entry.syncLists > 0) then
+    return true
+  end
+
+  if filters.hideLowIlvl then
+    local median = GetWatermarkMedian(entry.data and entry.data.watermarks)
+    -- no watermarks at all means we can't tell, so those stay visible rather than silently vanish
+    if median and median < ns.config.guiIlvlFilter then
+      return true
+    end
+  end
+
+  return false
+end
+
 local function GetCharacterList()
   local list = {}
   local droptimizerKeysToSynclist = {}
@@ -247,26 +319,27 @@ local function GetCharacterList()
       tinsert(droptimizerKeysToSynclist[droptimizerKey], listId)
     end
   end
-  for _, data in pairs(WowUtilsDB.ownCharacters) do
-    tinsert(list, {
+
+  local function AddCharacter(data, update)
+    local entry = {
       kind = "character",
       data = data,
       name = data.fullSlug or UNKNOWN,
-      update = data.lastUpdate or data.lastUpdateReceived or 0,
+      update = update,
       class = data.class,
+      version = data.addonVersion or "?", -- only synced since 1.0.0, older characters never sent one
       syncLists = droptimizerKeysToSynclist[data.droptimizerKey]
-    })
+    }
+    if IsFilteredOut(entry) then return end
+    tinsert(list, entry)
+  end
+
+  for _, data in pairs(WowUtilsDB.ownCharacters) do
+    AddCharacter(data, data.lastUpdate or data.lastUpdateReceived or 0)
   end
 
   for _, data in pairs(WowUtilsDB.others) do
-    tinsert(list, {
-      kind = "character",
-      data = data,
-      name = data.fullSlug or UNKNOWN,
-      update = data.lastUpdateReceived or data.lastUpdate or 0,
-      class = data.class,
-      syncLists = droptimizerKeysToSynclist[data.droptimizerKey]
-    })
+    AddCharacter(data, data.lastUpdateReceived or data.lastUpdate or 0)
   end
 
   table.sort(list, function(a, b)
@@ -669,8 +742,8 @@ local function SetupList(parent, getEntries, onSelect)
 
       row.name:SetText(sformat("%s %s", ns.helpers.GetIconTextureStringForClass(entry.class), entry.name or "?"))
       if entry.kind == "character" then
-        row.info:SetText(sformat("%s%s", entry.syncLists and sformat("%s   ", table.concat(entry.syncLists, ", ")) or "",
-          ns.helpers.GetFormatedLastUpdateTime(entry.update or 0)))
+        row.info:SetText(sformat("%sv%s   %s", entry.syncLists and sformat("%s   ", table.concat(entry.syncLists, ", ")) or "",
+          entry.version or "?", ns.helpers.GetFormatedLastUpdateTime(entry.update or 0)))
       else
         row.info:SetText(sformat("%s  %s", tostring(entry.key or "Unknown"),
           ns.helpers.GetFormatedLastUpdateTime(entry.update or 0)))
@@ -797,7 +870,38 @@ function GUI:Create()
   self.rosterPanel = rosterPanel
   self.droptimizerPanel = droptimizerPanel
 
-  local rosterRefresh = SetupList(rosterPanel, function()
+  -- these only apply to the roster, so the bar lives inside that panel instead of the window header
+  local filterBar = CreateFrame("Frame", nil, rosterPanel)
+  filterBar:SetPoint("TOPLEFT", rosterPanel, "TOPLEFT", 10, -6)
+  filterBar:SetPoint("TOPRIGHT", rosterPanel, "TOPRIGHT", -10, -6)
+  filterBar:SetHeight(24)
+
+  local filters = WowUtilsDB.options.characterFilters
+
+  local function SetFilter(key, checked)
+    filters[key] = checked or nil
+    if self.rosterRefresh then
+      self.rosterRefresh()
+    end
+  end
+
+  local hideUntracked = CreateCheckbox(filterBar, "Hide untracked", function(checked)
+    SetFilter("hideUntracked", checked)
+  end)
+  hideUntracked:SetPoint("LEFT", filterBar, "LEFT", 0, 0)
+  hideUntracked:SetChecked(filters.hideUntracked and true or false)
+
+  local hideLowIlvl = CreateCheckbox(filterBar, "Hide Low ilvl characters", function(checked)
+    SetFilter("hideLowIlvl", checked)
+  end)
+  hideLowIlvl:SetPoint("LEFT", hideUntracked.label, "RIGHT", 14, -1)
+  hideLowIlvl:SetChecked(filters.hideLowIlvl and true or false)
+
+  local rosterList = CreateFrame("Frame", nil, rosterPanel)
+  rosterList:SetPoint("TOPLEFT", filterBar, "BOTTOMLEFT", -10, -2)
+  rosterList:SetPoint("BOTTOMRIGHT", rosterPanel, "BOTTOMRIGHT", 0, 0)
+
+  local rosterRefresh = SetupList(rosterList, function()
     return GetCharacterList()
   end, function(entry)
     self:ShowCharacterDetail(entry)

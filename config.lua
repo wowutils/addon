@@ -19,6 +19,7 @@ ns.config = {
   currentDBVersion = 2,
   configVersion = 4,
   droptimizerKeepTime = 14*24*60*60, -- 14 days. shared by the import and the cleanup sweep so the two can't fight over the same sims
+  guiIlvlFilter = 250, -- roster "Hide Low ilvl characters" cutoff, compared against the median watermark
   watermarks = {
     startingPoint = 250,
     multiplier = 50,
