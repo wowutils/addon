@@ -416,7 +416,7 @@ local function BuildDetailTextForCharacter(char)
   end
   for _, vaultData in ipairs(safeTable(char.vaultData)) do
     ---@cast vaultData wowutils_vaultData_items
-    tinsert(lines, pad(sformat("%s (%s)%s", vaultData.itemId == 1 and "Currency" or vaultData.itemLink or UNKNOWN, (vaultData.itemLevel or 0) > 0 and vaultData.itemLevel or "?", vaultData.picked and " |cff00ff00Picked|r" or "")))
+    tinsert(lines, pad(sformat("%s (%s)%s", vaultData.itemId == 1 and "Currency" or vaultData.itemId == 2 and "Coin" or vaultData.itemLink or UNKNOWN, (vaultData.itemLevel or 0) > 0 and vaultData.itemLevel or "?", vaultData.picked and " |cff00ff00Picked|r" or "")))
   end
   tinsert(lines, "Weekly Rewards " .. ns.helpers.GetFormatedLastUpdateTime(char.weeklyRewardsUpdate))
   local weeklyRewardsFound = false

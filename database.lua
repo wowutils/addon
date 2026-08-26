@@ -382,11 +382,6 @@ function ns.database.SaveToCurrentCharacterDB(context, id, data)
   end
 
   if context == ns.enums.context.vaultData then
-    if #charDB.vaultData ~= #data then
-      charDB.vaultData = data
-      contextUpdated(context)
-      return
-    end
     local temp = {}
     local isChanged = false
     for k,v in pairs(charDB.vaultData) do

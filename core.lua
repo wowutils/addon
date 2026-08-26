@@ -30,12 +30,23 @@ do -- Weekly vault rewards
               end
             end
             if not found then  -- assume we picked currency
+              local bonusCoin = false
+              for _, activityInfo in ipairs(C_WeeklyRewards.GetActivities()) do
+                if activityInfo.claimID == claimID then
+                  for _, rewardInfo in ipairs(activityInfo.rewards) do
+                    if rewardInfo.id == 3513 then
+                      bonusCoin = true
+                    end
+                  end
+                  break
+                end
+              end
               table.insert(db.vaultData, {
                 picked = true,
                 claimID = claimID,
                 itemClassId = 0,
                 itemSubClassId = 0,
-                itemId = 1,
+                itemId = bonusCoin and 2 or 1,
                 itemLink = "",
                 itemLevel = 0,
                 itemLocationId = 0,
