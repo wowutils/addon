@@ -225,6 +225,7 @@ charDB.addonVersion = C_AddOns.GetAddOnMetadata(addon_name, "Version")
 ns.database = {}
 ns.database.ownSlugs = {}
 local clearOldConfigData = (db.configVersion or 0) < ns.config.configVersion
+local resetCraftingItems = (db.configVersion or 0) < 4
 if clearOldConfigData then
   -- the import only re-reads a character when the source file is newer than what we already
   -- stored, so an existing install would never run the droptimizer prune until the next time
@@ -256,7 +257,9 @@ for k,v in pairs(WowUtilsDB.ownCharacters) do
     for del in pairs(toDelete) do
       v.quests[del] = nil
     end
-    v.craftingItems = 0
+    if resetCraftingItems then
+      v.craftingItems = 0
+    end
   end
 end
 db.configVersion = ns.config.configVersion

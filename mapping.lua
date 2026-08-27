@@ -3,7 +3,7 @@
 
 ---@type string, wowutilsPrivate
 local addon_name, ns = ...
-local tconcat, sformat, tinsert, floor, strsplit, SerializeCBOR, DeserializeCBOR, EncodeBase64, DecodeBase64 = table.concat, string.format, table.insert, math.floor, strsplit, C_EncodingUtil.SerializeCBOR, C_EncodingUtil.DeserializeCBOR, C_EncodingUtil.EncodeBase64, C_EncodingUtil.DecodeBase64
+local tconcat, sformat, tinsert, floor, sbyte, strsplit, SerializeCBOR, DeserializeCBOR, EncodeBase64, DecodeBase64 = table.concat, string.format, table.insert, math.floor, string.byte, strsplit, C_EncodingUtil.SerializeCBOR, C_EncodingUtil.DeserializeCBOR, C_EncodingUtil.EncodeBase64, C_EncodingUtil.DecodeBase64
 local _cache = {}
 
 ---@alias wowutils_mapping_toRealDataFunc fun(configVersion:number, dbVersion:number, str:string, db:wowutils_otherChar?, key:string?, channel:string):...?
@@ -339,6 +339,9 @@ ns.mapping = {
     end,
     [currentUsage.whitelistCharSyncRequest] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- J
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
+      -- this one answers with data, so don't bother for a requester on an older config: since 5 the
+      -- payload is zlib wrapped and they would just drop whatever we sent back
+      if configVersion < ns.config.configVersion then return end
       --[[
        for _,v in pairs(data) do
         tinsert(temp, sformat("%s?%s", v.id, v.timestamp))
@@ -467,6 +470,8 @@ ns.mapping = {
     end,
     [currentUsage.syncListRequest] = function(configVersion, dbVersion, str, db, targetGuid, channel) -- N
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
+      -- answers with data too, same reasoning as J: an older config can't read our reply
+      if configVersion < ns.config.configVersion then return end
       local listId, timestamp = strsplit("?", str)
       ---@diagnostic disable-next-line: cast-local-type
       timestamp = tonumber(timestamp)
@@ -551,12 +556,132 @@ ns.mapping = {
   },
 }
 
+-- per initial byte: the cbor major type, the inline value, and how many argument bytes follow
+-- (-1 indefinite length, nil not valid cbor). a lookup beats a floor() call plus a division and a
+-- modulo on every item, which is worth it since this runs once per item of every incoming payload.
+local cborMajor, cborInline, cborArgBytes = {}, {}, {}
+for ib = 0, 255 do
+  local ai = ib % 32
+  cborMajor[ib] = floor(ib / 32)
+  cborInline[ib] = ai
+  if ai < 24 then cborArgBytes[ib] = 0
+  elseif ai == 24 then cborArgBytes[ib] = 1
+  elseif ai == 25 then cborArgBytes[ib] = 2
+  elseif ai == 26 then cborArgBytes[ib] = 4
+  elseif ai == 27 then cborArgBytes[ib] = 8
+  elseif ai == 31 then cborArgBytes[ib] = -1
+  end -- 28..30 stay nil, they are not valid cbor
+end
+
+local MAX_CBOR_DEPTH = 32
+-- reused across calls so validating a payload allocates nothing at all and adds no gc pressure.
+-- safe to share: lua is single threaded here, the walk never yields, and every read of a slot is
+-- of a value the same call wrote on its way down, so leftovers from a previous payload are dead.
+local cborStack = {}
+-- C_EncodingUtil.DeserializeCBOR sizes its allocations straight from the length/count header of each
+-- item it reads, so a corrupted header doesn't error, it kills the client: one truncated payload
+-- decoded into an array header claiming 1914713654 entries and wow tried to allocate 45.9GB and died
+-- on OOM inside lmemPool.cpp. that happens in the C allocator below lua, where a pcall can't reach it.
+-- so walk the payload first and confirm every length and count actually fits in the bytes we received,
+-- that nesting stays sane, and that the whole string is exactly one item with nothing trailing.
+--
+-- a length or checksum on the wire is NOT a substitute. it can't be: it only covers senders running a
+-- version that sends one, and corruption keeps the length intact often enough to matter (a garbled
+-- byte inflates to a same-length payload about two thirds of the time, and ~1 in 6 of the payloads
+-- that would crash us survive a length check). it also does nothing about someone deliberately
+-- sending a crafted header on our prefix to drop the whole guild. this walk covers all of that.
+-- cost is 0.02ms for a payload the size of the one that crashed and 1.3ms for a 138kb one, against
+-- ~1.1ms just for the tables the deserializer has to allocate for that same payload regardless.
+---@param s string
+---@return boolean
+local function isWellFormedCBOR(s)
+  local len = #s
+  local pos = 1
+  local stack, depth = cborStack, 0 -- enclosing levels' counts; the current level's stays in a local
+  local expected = 1                -- items still expected at this level, -1 while inside an indefinite length item
+  while true do
+    if expected == 0 then
+      if depth == 0 then break end                -- the one top level item is complete
+      expected = stack[depth]
+      depth = depth - 1
+    elseif pos > len then
+      return false                                -- ran out of bytes mid item
+    else
+      local ib = sbyte(s, pos)
+      pos = pos + 1
+      if ib == 0xFF then                          -- break, only ever closes an indefinite length item
+        if expected ~= -1 then return false end
+        if depth == 0 then
+          expected = 0
+        else
+          expected = stack[depth]
+          depth = depth - 1
+        end
+      else
+        if expected ~= -1 then expected = expected - 1 end
+        local argBytes = cborArgBytes[ib]
+        if not argBytes then return false end
+        local major = cborMajor[ib]
+        if argBytes == -1 then                    -- indefinite length, only strings, arrays and maps may use it
+          if major < 2 or major > 5 then return false end
+          depth = depth + 1
+          if depth > MAX_CBOR_DEPTH then return false end
+          stack[depth] = expected
+          expected = -1
+        elseif major >= 2 and major <= 5 then     -- byte string, text string, array or map: the argument is a size
+          if argBytes == 8 then return false end  -- nothing arriving over a chat channel needs a 64 bit size
+          if pos + argBytes - 1 > len then return false end
+          local value = cborInline[ib]
+          if argBytes == 1 then
+            value = sbyte(s, pos)
+          elseif argBytes == 2 then
+            local a, b = sbyte(s, pos, pos + 1)
+            value = a * 256 + b
+          elseif argBytes == 4 then
+            local a, b, c, d = sbyte(s, pos, pos + 3)
+            value = ((a * 256 + b) * 256 + c) * 256 + d
+          end
+          pos = pos + argBytes
+          local left = len - pos + 1
+          if major > 3 then                       -- every array entry needs at least one more byte, every map entry at least two
+            if value > (major == 4 and left or left / 2) then return false end
+            if value > 0 then
+              depth = depth + 1
+              if depth > MAX_CBOR_DEPTH then return false end
+              stack[depth] = expected
+              expected = major == 4 and value or value * 2
+            end
+          else
+            if value > left then return false end
+            pos = pos + value
+          end
+        else
+          if pos + argBytes - 1 > len then return false end
+          pos = pos + argBytes                    -- integer, tag or simple value: no size to bound
+          if major == 6 then                      -- a tag is followed by exactly one more item
+            depth = depth + 1
+            if depth > MAX_CBOR_DEPTH then return false end
+            stack[depth] = expected
+            expected = 1
+          end
+        end
+      end
+    end
+  end
+  return pos > len -- exactly one item, nothing trailing
+end
+
 -- incoming payloads can arrive corrupted (AceComm has no integrity check, so a dropped or interleaved
--- multipart chunk still gets reassembled and fired at us). never let that throw, just drop the message.
+-- multipart chunk still gets reassembled and fired at us, and DecompressString happily returns garbage
+-- for a broken deflate stream). never let that through, just drop the message.
 ---@param cborStr string?
 ---@return table?
 function ns.mapping.SafeDeserializeCBOR(cborStr)
   if type(cborStr) ~= "string" or cborStr == "" then return end
+  if not isWellFormedCBOR(cborStr) then
+    ns.Debug.print("malformed cbor payload (#%s bytes), dropping message", #cborStr)
+    return
+  end
   local ok, t = pcall(DeserializeCBOR, cborStr)
   if not ok or type(t) ~= "table" then
     ns.Debug.print("corrupted cbor payload (#%s bytes), dropping message", #cborStr)

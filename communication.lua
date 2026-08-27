@@ -60,10 +60,13 @@ ns.communication.msgHandlers[prefixes.normal] = function(prefix, msg, channel, s
       ns.Debug.print("not for me")
       return
     end
-    if dbVersion < ns.config.currentDBVersion then
-      ns.Debug.print("dbversion is too old")
+    -- no point in sending newer data to an older addon, it can't read it. configVersion counts as
+    -- much as dbVersion now that 5 moved the wire format to zlib: a client on an older config drops
+    -- our reply outright, so answering it only burns chat bandwidth.
+    if dbVersion < ns.config.currentDBVersion or configVersion < ns.config.configVersion then
+      ns.Debug.print("requester is on an older version (db '%s', config '%s'), not replying", dbVersion, configVersion)
       return
-    end                                                                                              -- no point in sending newer data to older addon
+    end
     ns.communication.SendFullSyncFromCurrentCharacter(channel)
     return
   end
@@ -136,7 +139,11 @@ if ns.hasDataAddon then
     for i = 2, 8 do
       data[i] = fixedPoint - (tonumber(data[i]) or 0)
     end
-    if data[9] and WowUtilsDB.droptimizerData[data[9]] then -- droptimizerKey
+    -- only answer a sender on our own config: since 5 the payload is zlib wrapped, so an older client
+    -- would just drop the droptimizer data. the RequestFullSync calls further down stay unconditional
+    -- though, those still pay off: the request rides in the uncompressed header so an older client
+    -- reads it fine and answers in deflate, which prepString falls back to.
+    if data[9] and WowUtilsDB.droptimizerData[data[9]] and configVersion >= ns.config.configVersion then -- droptimizerKey
       if WowUtilsDB.droptimizerData[data[9]].lastUpdate > data[8] then
         ns.communication.SendDroptimizerData(data[9])
       end
@@ -263,7 +270,12 @@ end
 ---@overload fun(str:string?, sending:false):string? -- nil when the payload could not be decoded (corrupted/incomplete transfer)
 function private.prepString(str, sending)
   if sending then
-    local compressed = CompressString(str, Enum.CompressionMethod.Deflate, Enum.CompressionLevel.OptimizeForSize)
+    -- zlib rather than raw deflate: the wrapper carries an adler-32 that DecompressString verifies
+    -- down in C, so a payload garbled in transit errors out instead of inflating into plausible
+    -- looking garbage that we would happily write to the db. raw deflate has no trailer at all, so
+    -- nothing catches that. costs 8 bytes on the wire and never an extra AceComm chunk in practice.
+    -- clients older than 1.0.6 can't read these and will just drop them, which is fine.
+    local compressed = CompressString(str, Enum.CompressionMethod.Zlib, Enum.CompressionLevel.OptimizeForSize)
     local encoded = EncodeBase64(compressed)
     ns.Debug.print("Results: Uncompressed #%s - Compressed #%s - Encoded #%s", str:len(), compressed:len(), encoded:len())
     return encoded
@@ -276,8 +288,21 @@ function private.prepString(str, sending)
     ns.Debug.print("failed to base64 decode incoming message (#%s)", str:len())
     return
   end
+  -- zlib first (1.0.6+), then raw deflate for anyone still on an older version. the two can't be
+  -- confused: raw deflate fails zlib's header check, so it falls through to the second attempt.
+  -- note the checksum only catches accidental corruption. it is no defence against someone
+  -- deliberately sending a crafted payload on our prefix, since they can compute a valid checksum
+  -- just as easily. that is what the structural walk in ns.mapping.SafeDeserializeCBOR is for, and
+  -- why it has to keep running on every payload no matter how this decompressed.
   local decompressed
-  ok, decompressed = pcall(DecompressString, compressed, Enum.CompressionMethod.Deflate)
+  ok, decompressed = pcall(DecompressString, compressed, Enum.CompressionMethod.Zlib)
+  if not ok or type(decompressed) ~= "string" then
+    -- TODO remove this deflate fallback once nobody is on a pre-1.0.6 version any more. it only
+    -- exists to keep reading their data during the changeover (they still send raw deflate, and the
+    -- handlers accept older configVersions, so this runs before any version check can spare us).
+    -- once it's gone it stops being a second chance for a corrupt payload to be read as deflate.
+    ok, decompressed = pcall(DecompressString, compressed, Enum.CompressionMethod.Deflate)
+  end
   if not ok or type(decompressed) ~= "string" then
     ns.Debug.print("failed to decompress incoming message (#%s)", str:len())
     return
