@@ -6,7 +6,7 @@ local addon_name, ns = ...
 local tconcat, sformat, tinsert, floor, sbyte, strsplit, SerializeCBOR, DeserializeCBOR, EncodeBase64, DecodeBase64 = table.concat, string.format, table.insert, math.floor, string.byte, strsplit, C_EncodingUtil.SerializeCBOR, C_EncodingUtil.DeserializeCBOR, C_EncodingUtil.EncodeBase64, C_EncodingUtil.DecodeBase64
 local _cache = {}
 
----@alias wowutils_mapping_toRealDataFunc fun(configVersion:number, dbVersion:number, str:string, db:wowutils_otherChar?, key:string?, channel:string):...?
+---@alias wowutils_mapping_toRealDataFunc fun(configVersion:number, dbVersion:number, str:string, db:wowutils_otherChar?, key:string?, channel:string, sender:string):...?
 
 ---@param guid string
 ---@param channel string
@@ -17,6 +17,15 @@ local function confirmAndReturnDBForChar(guid, channel)
     return
   end
   return WowUtilsDB.others[guid]
+end
+
+local alreadyCheckedAddonVersions = {}
+local function checkVersionForUpdate(versionStr, sender)
+  if not versionStr then return end
+  if alreadyCheckedAddonVersions[versionStr] then return end
+  alreadyCheckedAddonVersions[versionStr] = true
+  if not ns.helpers.IsNewerAddonVersion(versionStr) then return end
+  ns.print(sformat("Newer addon version - %s - detected from '%s'.", versionStr, sender))
 end
 
 ---@enum CurrentMappingUsage
@@ -232,6 +241,9 @@ ns.mapping = {
       if WowUtilsDB.droptimizerData[key] and WowUtilsDB.droptimizerData[key].lastUpdate >= timestamp then return end -- already have newer data
       local t = ns.mapping.SafeDeserializeCBOR(cborStr)
       if not t then return end
+      -- the guard above only rejects senders on a *newer* db, so a client still on db 2 gets
+      -- through here with the pre-array item shape. normalize rather than drop them
+      ns.database.NormalizeDroptimizerRecord(t)
       WowUtilsDB.droptimizerData[key] = t
     end,
     [currentUsage.fullCharacterSync] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- F
@@ -447,23 +459,27 @@ ns.mapping = {
       ns.database.CheckEligibleSyncLists()
       ns.Debug.print("Updated syncList '%s' - from '%s'", listId, partialGuid)
     end,
-    [currentUsage.generalUpdateCheck] = function(configVersion, dbVersion, str, db, sourceGuid, channel) -- M
-      if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
+    [currentUsage.generalUpdateCheck] = function(configVersion, dbVersion, str, db, sourceGuid, channel, sender) -- M
+      local tooNew = configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion
       for _, dataStr in pairs({ strsplit("^", str) }) do
         local dataType = dataStr:sub(1, 1)
         if dataType == "A" then
-          local listId, timestamp = strsplit("?", dataStr:sub(2))
-          if listId and timestamp then
-            if not WowUtilsDB.syncLists[listId] or WowUtilsDB.syncLists[listId].lastUpdate < ns.mapping.timestamp.FromValue(timestamp) then
-              ns.communication.RequestSyncList(listId, (WowUtilsDB.syncLists[listId] and WowUtilsDB.syncLists[listId].lastUpdate or 0))
+          if not tooNew then
+            local listId, timestamp = strsplit("?", dataStr:sub(2))
+            if listId and timestamp then
+              if not WowUtilsDB.syncLists[listId] or WowUtilsDB.syncLists[listId].lastUpdate < ns.mapping.timestamp.FromValue(timestamp) then
+                ns.communication.RequestSyncList(listId, (WowUtilsDB.syncLists[listId] and WowUtilsDB.syncLists[listId].lastUpdate or 0))
+              end
             end
           end
         elseif dataType == "B" then -- version
           local versionStr = dataStr:sub(2)
-          if not db then
-            db = confirmAndReturnDBForChar(sourceGuid, channel)
-            if not db then return end
-            db.addonVersion = versionStr
+          checkVersionForUpdate(versionStr, sender)
+          if versionStr and not tooNew then
+            db = db or confirmAndReturnDBForChar(sourceGuid, channel)
+            if db then
+              db.addonVersion = versionStr
+            end
           end
         end
       end
@@ -965,12 +981,9 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
   end
   if context == ns.enums.context.generalUpdatedCheck then
     local temp = {}
-    -- we are currently only checking syncLists through this TODO only sync lists with at least one guild member
     for listId, listData in pairs(WowUtilsDB.syncLists) do
       tinsert(temp, sformat("A%s?%s", listId, ns.mapping.timestamp.ToValue(listData.lastUpdate or 0)))
     end
-    if #temp == 0 then return "" end
-    -- just add addon version here since we are sending this every 2mins for everyone anyway
     tinsert(temp, sformat("B%s", addonVersion))
     return sformat("%s%s", currentUsage.generalUpdateCheck, tconcat(temp, "^"))
   end

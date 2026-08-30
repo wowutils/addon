@@ -44,6 +44,7 @@ local addon_name, ns = ...
 ---@field specId? number
 ---@field simType "raidbots"|"qelive"
 ---@field profileKey string
+---@field raidScope? string added in schema 4, "<expansion>-s<season>" e.g. "midnight-s2". NOT part of the droptimizer id, so two scopes sharing a profileKey collide
 ---@field fightStyle? string raidbots only
 ---@field targets number
 ---@field simmedAt number unix
@@ -55,9 +56,16 @@ local addon_name, ns = ...
 ---@field slot string
 ---@field ilvl number
 ---@field difficulty "normal"|"heroic"|"mythic"
----@field difficultyId number?
+---@field difficultyId number? the difficulty the sim ran at, not the item's own track. negative encounterIds carry the raid difficulty anyway
+---@field encounterId? number added in schema 4, journal encounter the item drops from. negative for non-raid sources (-97 seen on catalyst/other pieces)
+---@field sourceItem? wowutilsData_import_droptimizer_item_source added in schema 4, set when the item isn't a direct drop (tier token or catalyst conversion)
 ---@field dpsGain number? raidbots Only
 ---@field dpsGainPercent number? qelive only
+
+---@class wowutilsData_import_droptimizer_item_source what actually has to drop for the parent item to be obtainable
+---@field itemId number the token/base item that converts into the parent item
+---@field encounterId? number encounter the source item drops from
+---@field catalyst? boolean true when the conversion is a catalyst charge rather than a tier token
 
 ---@class wowutilsData_import_wishlist
 ---@field itemId number
@@ -159,19 +167,63 @@ do
 end
 
 
+---Two rows are the same entry only when every field that could tell them apart matches. A ring
+---simmed into both finger slots, or a piece reachable both as a drop and through the catalyst,
+---are genuinely different results for the same itemId and both have to survive.
+---@param a wowutilsDroptimizerData_droptimizerItem
+---@param b wowutilsDroptimizerData_droptimizerItem
+---@return boolean
+function private.IsSameDroptimizerEntry(a, b)
+  if a.equipmentSlot ~= b.equipmentSlot then return false end
+  if a.difficultyId ~= b.difficultyId then return false end
+  if a.ilvl ~= b.ilvl then return false end
+  local aSource, bSource = a.sourceItem, b.sourceItem
+  if (aSource ~= nil) ~= (bSource ~= nil) then return false end
+  if aSource and bSource then
+    if aSource.itemId ~= bSource.itemId then return false end
+    if (aSource.catalyst or false) ~= (bSource.catalyst or false) then return false end
+  end
+  return true
+end
+
 ---@param d wowutilsData_import_droptimizer_item[]
----@return table<number, wowutilsDroptimizerData_droptimizerItem>
+---@return table<number, wowutilsDroptimizerData_droptimizerItem[]>
 function private.ParseDroptimizerItems(d)
-  ---@type table<number, wowutilsDroptimizerData_droptimizerItem>
+  ---@type table<number, wowutilsDroptimizerData_droptimizerItem[]>
   local t = {}
   for _,v in pairs(d) do
-    t[v.itemId] = {
+    ---@type wowutilsDroptimizerData_droptimizerItem
+    local entry = {
       difficultyId = v.difficultyId or private.GetDifficultyId(v.difficulty),
       equipmentSlot = private.GetEquipmentSlotId(v.slot),
       ilvl = v.ilvl,
       gain = v.dpsGain,
       gainPercent = v.dpsGainPercent,
+      encounterId = v.encounterId,
+      -- copied field by field rather than kept by reference: the import table is transient and
+      -- this ends up in saved variables
+      sourceItem = v.sourceItem and {
+        itemId = v.sourceItem.itemId,
+        encounterId = v.sourceItem.encounterId,
+        catalyst = v.sourceItem.catalyst,
+      } or nil,
     }
+    local entries = t[v.itemId]
+    if not entries then
+      t[v.itemId] = { entry }
+    else
+      local replaced = false
+      for i = 1, #entries do
+        if private.IsSameDroptimizerEntry(entries[i], entry) then
+          entries[i] = entry
+          replaced = true
+          break
+        end
+      end
+      if not replaced then
+        entries[#entries + 1] = entry
+      end
+    end
   end
   return t
 end
@@ -293,7 +345,11 @@ function ns.dataImport.ImportDroptimizers()
               if not targetDB.specs[droptimizerData.specId] then
                 targetDB.specs[droptimizerData.specId] = {}
               end
-              if not targetDB.specs[droptimizerData.specId][droptimizerId] or targetDB.specs[droptimizerData.specId][droptimizerId].simmedAt < droptimizerData.simmedAt then
+              -- a forced pass rewrites the sim even when it has not been re-simmed. the timestamp
+              -- only tells us the sim is the same one, not that we stored everything it carries:
+              -- a db upgrade that starts keeping new fields has to re-read what is already there
+              local storedSim = targetDB.specs[droptimizerData.specId][droptimizerId]
+              if force or not storedSim or storedSim.simmedAt < droptimizerData.simmedAt then
                 ---@type wowutilsDroptimizerData_sims
                 targetDB.specs[droptimizerData.specId][droptimizerId] = {
                   items = private.ParseDroptimizerItems(droptimizerData.items),

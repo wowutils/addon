@@ -1,3 +1,4 @@
+
 ---@class wowutilsPrivate
 ---@field enums wowutils_enums
 
@@ -90,5 +91,11 @@ ns.enums = {
     champion = 4,
     hero = 5,
     myth = 6,
-  }
+  },
+  ---@enum wowutils_enums_printColors
+  printColors = {
+    normal = 1,
+    warning = 2,
+    error = 3,
+  },
 }

@@ -1,6 +1,8 @@
 ---@class wowutilsPrivate
+---@field version wowutilsPrivate_version
 ---@field helpers wowutils_helpers
 ---@field Debug wowutilsDebug
+---@field print fun(text:string, colorEnum:wowutils_enums_printColors?)
 
 ---@type string, wowutilsPrivate
 local addon_name, ns = ...
@@ -30,6 +32,10 @@ function ns.Debug.AddToDevTool(data, displayName)
   if not ns.debugMode then return end
   if not DevTool then return end
   DevTool:AddData(data, displayName)
+end
+
+function ns.print(text, colorEnum)
+  print("WowUtils: ".. text)
 end
 
 do
@@ -206,6 +212,17 @@ function ns.helpers.spairs(t, order)
   end
 end
 
+---Splits a full character name into its two parts. Only the character half is guaranteed to be
+---hyphen free -- realm names are not ("Король-лич"), so an unbounded split silently drops
+---everything past the first hyphen and leaves a realm that resolves to nothing.
+---@param name string "Name" or "Name-Realm"
+---@return string charName
+---@return string? realm nil when the name carries no realm at all
+function ns.helpers.SplitFullName(name)
+  local charName, realm = strsplit("-", name, 2)
+  return charName, (realm ~= nil and realm ~= "") and realm or nil
+end
+
 do
   local cache = {
     [""] = "|T134400:0|t"
@@ -258,6 +275,36 @@ do
   ---@return number universalSlot
   function ns.helpers.GetUniversalSlot(slot)
     return needsConverting[slot] or slot
+  end
+end
+do
+  -- paired slots are built from the INVTYPE_ base rather than the FINGER0SLOT/TRINKET0SLOT
+  -- globals: those are not guaranteed to differ between the two slots in every locale, and the
+  -- whole point of these labels is telling the two apart
+  ---@diagnostic disable: undefined-global these are GlobalStrings, the API definitions don't carry them
+  local slotNames = {
+    [INVSLOT_HEAD] = HEADSLOT,
+    [INVSLOT_NECK] = NECKSLOT,
+    [INVSLOT_SHOULDER] = SHOULDERSLOT,
+    [INVSLOT_CHEST] = CHESTSLOT,
+    [INVSLOT_WAIST] = WAISTSLOT,
+    [INVSLOT_LEGS] = LEGSSLOT,
+    [INVSLOT_FEET] = FEETSLOT,
+    [INVSLOT_WRIST] = WRISTSLOT,
+    [INVSLOT_HAND] = HANDSSLOT,
+    [INVSLOT_BACK] = BACKSLOT,
+    [INVSLOT_MAINHAND] = MAINHANDSLOT,
+    [INVSLOT_OFFHAND] = SECONDARYHANDSLOT,
+    [INVSLOT_FINGER1] = sformat("%s 1", INVTYPE_FINGER),
+    [INVSLOT_FINGER2] = sformat("%s 2", INVTYPE_FINGER),
+    [INVSLOT_TRINKET1] = sformat("%s 1", INVTYPE_TRINKET),
+    [INVSLOT_TRINKET2] = sformat("%s 2", INVTYPE_TRINKET),
+  }
+  ---@diagnostic enable: undefined-global
+  ---@param slot number?
+  ---@return string? name
+  function ns.helpers.GetEquipmentSlotName(slot)
+    return slot and slotNames[slot] or nil
   end
 end
 do
@@ -357,4 +404,51 @@ do
     separator:SetSize(math.max(tooltip:GetWidth() - (padding * 2), 1), 1)
     separator:Show()
   end
+end
+
+---@class wowutilsPrivate_version
+---@field versionStr string
+---@field major number
+---@field minor number
+---@field patch number
+
+---@param versionStr string
+---@return wowutilsPrivate_version
+function ns.helpers.ConvertVersionToTable(versionStr)
+  local _major, _minor, _patch = versionStr:match("^(%d-)%.(%d-)%.(%d+)")
+  return {
+    versionStr = versionStr,
+    major = tonumber(_major) or 0,
+    minor = tonumber(_minor) or 0,
+    patch = tonumber(_patch) or 0,
+  }
+end
+
+ns.version = ns.helpers.ConvertVersionToTable(C_AddOns.GetAddOnMetadata(addon_name, "version"))
+
+---@param version1 wowutilsPrivate_version|string
+---@param version2 wowutilsPrivate_version|string? defaults to current addon version
+---@return boolean
+function ns.helpers.IsNewerAddonVersion(version1, version2)
+  local _compare1
+  if type(version1) == "string" then
+    _compare1 = ns.helpers.ConvertVersionToTable(version1)
+  elseif type(version1) == "table" then
+    _compare1 = version1
+  else
+    return false
+  end
+
+  local _compare2
+  if type(version2) == "string" then
+    _compare2 = ns.helpers.ConvertVersionToTable(version2)
+  elseif type(version2) == "table" then
+    _compare2 = version2
+  else
+    _compare2 = ns.version
+  end
+
+  if _compare1.major ~= _compare2.major then return _compare1.major > _compare2.major end
+  if _compare1.minor ~= _compare2.minor then return _compare1.minor > _compare2.minor end
+  return _compare1.patch > _compare2.patch
 end

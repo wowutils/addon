@@ -27,7 +27,6 @@ ns.communication = {
 }
 local charDB = ns.database.GetCurrentCharDB()
 local allCharsDB = ns.database.GetAllCharsDB()
-
 ns.communication.msgHandlers[prefixes.normal] = function(prefix, msg, channel, sender)
   if channel ~= "GUILD" then return end -- only accept messages from guild chat for now
   if UnitIsUnit("player", sender) then return end
@@ -78,7 +77,7 @@ ns.communication.msgHandlers[prefixes.normal] = function(prefix, msg, channel, s
     if not dataString then return end
     local dataType = dataString:sub(1, 1)
     if ns.mapping.toRealData[dataType] then
-      ns.mapping.toRealData[dataType](configVersion, dbVersion, dataString:sub(2), nil, id, channel)
+      ns.mapping.toRealData[dataType](configVersion, dbVersion, dataString:sub(2), nil, id, channel, sender)
     elseif ns.debugMode then
       geterrorhandler()("No handler found for data type: " .. dataType)
     end
@@ -107,7 +106,7 @@ ns.communication.msgHandlers[prefixes.normal] = function(prefix, msg, channel, s
   for _, dataStr in pairs({ strsplit("@", dataString) }) do
     local dataType = dataStr:sub(1, 1)
     if ns.mapping.toRealData[dataType] then
-      ns.mapping.toRealData[dataType](configVersion, dbVersion, dataStr:sub(2), nil, fullGuid, channel)
+      ns.mapping.toRealData[dataType](configVersion, dbVersion, dataStr:sub(2), nil, fullGuid, channel, sender)
     else
       geterrorhandler()("No handler found for data type: " .. dataType)
     end

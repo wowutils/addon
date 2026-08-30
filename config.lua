@@ -16,7 +16,7 @@ ns.hasDataAddon = WowUtilsPublicDataAPI and true or false
 ---@class wowutils_config
 ns.config = {
   timestampOffset = 1767225600, -- 	01/01/26 00:00:00 UTC
-  currentDBVersion = 2,
+  currentDBVersion = 3, -- 3: sim items are keyed itemId -> array of entries, so a sim can report the same item for more than one slot/source
   configVersion = 5, -- 5: payloads are zlib wrapped now, pre-1.0.6 clients can't read them so let them ignore us outright
   droptimizerKeepTime = 14*24*60*60, -- 14 days. shared by the import and the cleanup sweep so the two can't fight over the same sims
   guiIlvlFilter = 250, -- roster "Hide Low ilvl characters" cutoff, compared against the median watermark

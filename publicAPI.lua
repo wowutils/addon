@@ -45,7 +45,9 @@ local function convertToCorrectUnit(unit, toDroptimizerKey)
       if not name then return nil end
       return sformat("%s-%s", name:lower(), (realm == nil or realm == "") and ns.me.realmId or ns.GetRealmId(nil, realm))
     end
-    local name, realm = strsplit("-", unit)
+    -- split on the first hyphen only: character names cannot contain one, but realm slugs do
+    -- ("tarren-mill", "twisting-nether"), and taking just the leading word never resolves
+    local name, realm = strsplit("-", unit, 2)
     if realm then -- its in Name-Realm format
       return sformat("%s-%s", name:lower(), ns.GetRealmId(nil, realm))
     end
@@ -200,6 +202,9 @@ function WowUtilsAPI.GetBonusCoinUsage(unit)
   return CopyTable(char.bonusCoinUsage or {}), 0, char.bonusCoinUsageUpdated or 0
 end
 ---Imported droptimizer/sim data. Also accepts a raw droptimizer key ("name-realmId").
+---Breaking change in db 3: `specs[specId][simId].items[itemId]` is an array of results, not a
+---single one. A sim can report the same item for more than one slot (rings, trinkets, weapons) or
+---reach it through the catalyst as well as directly, and every one of those is a different number.
 ---@param unit string
 ---@return wowutilsDroptimizerData? droptimizerData
 ---@return number? refreshed always 0, imported data is not refresh tracked
@@ -223,6 +228,27 @@ function WowUtilsAPI.GetWishlist(unit)
   local data = key and WowUtilsDB.droptimizerData[key]
   if not (data and data.wishlist) then return nil end
   return CopyTable(data.wishlist), 0, data.lastUpdate or 0
+end
+
+--#endregion
+
+--#region identifiers
+
+---Realm id for a character. This resolves an identifier rather than reading a stored data point,
+---so unlike the getters above it returns a single value with no timestamps, and it answers for
+---characters we have never seen as long as the realm itself is known.
+---@param unit string unitId, guid, name-realm, or a raw droptimizer key. a bare name resolves against your own realm
+---@return number? realmId nil when the realm cannot be resolved
+function WowUtilsAPI.GetRealmId(unit)
+  if not unit or issecretvalue(unit) then return nil end
+  -- every accepted identifier collapses to the droptimizer key, which is "name-realmId". character
+  -- names cannot contain a hyphen, so the trailing number is unambiguous
+  local key = findDroptimizerKey(unit)
+  if not key then return nil end
+  local realmId = tonumber(key:match("%-(%d+)$"))
+  -- 0 is what ns.GetRealmId reports for a realm it does not know
+  if not realmId or realmId == 0 then return nil end
+  return realmId
 end
 
 --#endregion

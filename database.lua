@@ -131,16 +131,23 @@ local GetServerTime, sformat = GetServerTime, string.format
 
 ---@class wowutilsDroptimizerData_sims
 ---@field simType wowutils_enums_simTypes
----@field items table<number, wowutilsDroptimizerData_droptimizerItem>
+---@field items table<number, wowutilsDroptimizerData_droptimizerItem[]> one array per itemId. a sim can report the same item more than once: rings/trinkets/weapons simmed into each slot they fit, and pieces reachable both as a drop and through the catalyst
 ---@field simmedAt number
 ---@field baseline number? raidbot only
 
 ---@class wowutilsDroptimizerData_droptimizerItem
 ---@field equipmentSlot number
 ---@field ilvl number
----@field difficultyId number
+---@field difficultyId number the difficulty the sim ran at, not the item's own track
 ---@field gain number? raidbots only
 ---@field gainPercent number? qelive only
+---@field encounterId number? journal encounter the item drops from, negative for non-raid sources
+---@field sourceItem wowutilsDroptimizerData_droptimizerItemSource? set when the item is not a direct drop
+
+---@class wowutilsDroptimizerData_droptimizerItemSource what actually has to drop for the parent item to be obtainable
+---@field itemId number the token/base item that converts into the parent item
+---@field encounterId number?
+---@field catalyst boolean? true for a catalyst charge rather than a tier token
 
 ---@class wowutilsDroptimizerData_wishlistItem
 ---@field equipmentSlot number
@@ -216,13 +223,46 @@ local charDB = WowUtilsDB.ownCharacters[ns.me.guid]
 local db = WowUtilsDB
 db.lastCharacter.guid = ns.me.guid
 db.lastCharacter.region = ns.me.regionId
+---db 2 stored a single entry per itemId (`items[itemId] = entry`), which silently dropped every
+---duplicate a sim reported for the same item. db 3 stores an array instead. Shared with the sync
+---path in mapping.lua: a guildmate still on db 2 can hand us their droptimizer data, and
+---normalizing it on arrival keeps them useful mid-upgrade instead of dropping the message.
+---@param record wowutilsDroptimizerData?
+local function normalizeDroptimizerRecord(record)
+  if not (record and record.specs) then return end
+  for _, sims in pairs(record.specs) do
+    for _, simData in pairs(sims) do
+      local items = simData.items
+      if items then
+        for itemId, entry in pairs(items) do
+          -- an array has [1] set, the old single entry never does. replacing an existing key
+          -- mid-pairs() is fine, only adding new ones is undefined
+          if entry[1] == nil and next(entry) ~= nil then
+            items[itemId] = { entry }
+          end
+        end
+      end
+    end
+  end
+end
+
 if db.dbVersion < ns.config.currentDBVersion then
   -- upgrade db based on version
+  if db.dbVersion < 3 then
+    for _, record in pairs(db.droptimizerData) do
+      normalizeDroptimizerRecord(record)
+    end
+    -- normalizing only reshapes what we already stored, and db 2 never kept encounterId or
+    -- sourceItem at all. without a re-read nothing would know a piece comes from the catalyst
+    -- until the source file next happens to change
+    ns.forceDroptimizerReimport = true
+  end
 end
 charDB.addonVersion = C_AddOns.GetAddOnMetadata(addon_name, "Version")
 
 ---@class wowutils_database
 ns.database = {}
+ns.database.NormalizeDroptimizerRecord = normalizeDroptimizerRecord
 ns.database.ownSlugs = {}
 local clearOldConfigData = (db.configVersion or 0) < ns.config.configVersion
 local resetCraftingItems = (db.configVersion or 0) < 4

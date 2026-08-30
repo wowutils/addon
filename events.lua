@@ -74,8 +74,12 @@ function ns.events.PLAYER_GUILD_UPDATE(unitId)
           if not name then
               break
           end
-          local charName, server = strsplit("-", name)
-          ns.currentGuildSlugs[string.format("%s-%d", charName, ns.GetRealmId(nil, server)):lower()] = true
+          local charName, server = ns.helpers.SplitFullName(name)
+          -- a guildmate on our own realm comes back without one, and GetRealmId answers 0 for a
+          -- realm it cannot place, which would collapse all of them onto the same bogus slug. an
+          -- unresolvable realm still has to stay 0 though, guessing our own would be worse
+          local realmId = server and ns.GetRealmId(nil, server) or ns.me.realmId
+          ns.currentGuildSlugs[string.format("%s-%d", charName, realmId):lower()] = true
       end
       ns.database.CheckEligibleSyncLists()
   end)

@@ -504,15 +504,35 @@ local function BuildDetailTextForDroptimizer(entry)
     for simId, simData in pairs(specSims) do
       tinsert(lines, pad(sformat("%s%s %s", ns.helpers.GetIconTextureStringForSpecId(specId), simId, ns.helpers.GetFormatedLastUpdateTime(simData.simmedAt))))
       tinsert(lines, pad(sformat("Source: %s", simData.simType == 1 and "RaidBots" or simData.simType == 2 and "QeLive" or UNKNOWN), 2))
-      for itemId, itemData in ns.helpers.spairs(simData.items, function(t,a,b) if simData.simType == 1 then return t[a].gain > t[b].gain else return (t[a].gainPercent or 0) > (t[b].gainPercent or 0) end end) do
-        ---@cast itemData wowutilsDroptimizerData_droptimizerItem
+      -- items are keyed itemId -> array of results, flatten before sorting so every result for an
+      -- item shows up rather than just one of them
+      local simItems = {}
+      for itemId, entries in pairs(simData.items) do
+        for i = 1, #entries do
+          tinsert(simItems, { itemId = itemId, data = entries[i] })
+        end
+      end
+      table.sort(simItems, function(a, b)
+        if simData.simType == 1 then return (a.data.gain or 0) > (b.data.gain or 0) end
+        return (a.data.gainPercent or 0) > (b.data.gainPercent or 0)
+      end)
+      for _, simItem in ipairs(simItems) do
+        local itemId = simItem.itemId
+        ---@type wowutilsDroptimizerData_droptimizerItem
+        local itemData = simItem.data
         droptimizerItemsFound = true
+        -- slot and source are what tell two results for the same item apart
+        local suffix = ns.helpers.GetEquipmentSlotName(itemData.equipmentSlot) or tostring(itemData.equipmentSlot)
+        if itemData.sourceItem then
+          suffix = sformat("%s, %s %s", suffix, itemData.sourceItem.catalyst and "catalyst from" or "from",
+            (select(2, C_Item.GetItemInfo(itemData.sourceItem.itemId))) or itemData.sourceItem.itemId)
+        end
         if itemData.gain then -- TODO calculate both
-          tinsert(lines, pad(sformat("%s %s (%s)", itemData.gain, (select(2, C_Item.GetItemInfo(itemId))) or UNKNOWN, itemData.ilvl), 2))
+          tinsert(lines, pad(sformat("%s %s (%s, %s)", itemData.gain, (select(2, C_Item.GetItemInfo(itemId))) or UNKNOWN, itemData.ilvl, suffix), 2))
         elseif itemData.gainPercent then
-          tinsert(lines, pad(sformat("%s%% %s (%s)", itemData.gainPercent, (select(2, C_Item.GetItemInfo(itemId))) or UNKNOWN, itemData.ilvl), 2))
+          tinsert(lines, pad(sformat("%s%% %s (%s, %s)", itemData.gainPercent, (select(2, C_Item.GetItemInfo(itemId))) or UNKNOWN, itemData.ilvl, suffix), 2))
         else
-          tinsert(lines, pad(sformat("NO VALUE? %s (%s)", (select(2, C_Item.GetItemInfo(itemId))) or UNKNOWN, itemData.ilvl), 2))
+          tinsert(lines, pad(sformat("NO VALUE? %s (%s, %s)", (select(2, C_Item.GetItemInfo(itemId))) or UNKNOWN, itemData.ilvl, suffix), 2))
         end
       end
     end

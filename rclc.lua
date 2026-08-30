@@ -108,6 +108,70 @@ do
     return instanceDifToItemTrack[instanceDif] == itemTrack
   end
 
+  ---@param entry wowutilsDroptimizerData_droptimizerItem
+  ---@param simType wowutils_enums_simTypes
+  ---@return number
+  local function entryValue(entry, simType)
+    if simType == ns.enums.simTypes.qeLiveDroptimizer then return entry.gainPercent or 0 end
+    return entry.gain or 0
+  end
+
+  ---A tier token is not equippable, so it has no slot to match on and never appears in `items`
+  ---under its own id. What it is worth is whatever it converts into, which the sims record the
+  ---other way round: each piece carries `sourceItem.itemId` pointing back at the token.
+  ---@param itemInfo CurrentItemInfo
+  ---@return boolean
+  local function isConvertedItem(itemInfo)
+    return (itemInfo.invSlotId or 0) == 0
+  end
+
+  ---@param entry wowutilsDroptimizerData_droptimizerItem
+  ---@param itemId number the item being looted
+  ---@return boolean
+  local function convertsFrom(entry, itemId)
+    return entry.sourceItem ~= nil and entry.sourceItem.itemId == itemId
+  end
+
+  ---Every result in this sim that the looted item accounts for: normally the entries stored under
+  ---its own id, but for a token the entries of every piece it turns into.
+  ---@param simData wowutilsDroptimizerData_sims
+  ---@param itemInfo CurrentItemInfo
+  ---@return wowutilsDroptimizerData_droptimizerItem[]?
+  local function entriesForViewedItem(simData, itemInfo)
+    if not isConvertedItem(itemInfo) then return simData.items[itemInfo.itemId] end
+    local found
+    for _, entries in pairs(simData.items) do
+      for i = 1, #entries do
+        if convertsFrom(entries[i], itemInfo.itemId) then
+          found = found or {}
+          found[#found + 1] = entries[i]
+        end
+      end
+    end
+    return found
+  end
+
+  ---A sim can hold several results for one itemId: a ring simmed into both finger slots, or a
+  ---piece reachable both as a drop and through the catalyst. For a single-value display we take
+  ---whichever placement gains the most, since that is where the player would actually equip it.
+  ---@param entries wowutilsDroptimizerData_droptimizerItem[]?
+  ---@param itemTrack number
+  ---@param simType wowutils_enums_simTypes
+  ---@return wowutilsDroptimizerData_droptimizerItem?
+  local function bestEntryFor(entries, itemTrack, simType)
+    if not entries then return nil end
+    local best
+    for i = 1, #entries do
+      local entry = entries[i]
+      if isCorrectDif(entry.difficultyId, itemTrack) then
+        if not best or entryValue(entry, simType) > entryValue(best, simType) then
+          best = entry
+        end
+      end
+    end
+    return best
+  end
+
   local simlineColors = {
     neutral = { 1, 1, 1 },
     loss = { .92, .5, 0 },
@@ -140,26 +204,26 @@ do
       local bestDif
       for specId, sims in pairs(droptimizerData.specs) do
         for simKey, simData in pairs(sims) do
-          if simData.items[itemInfo.itemId] then
-            if isCorrectDif(simData.items[itemInfo.itemId].difficultyId, itemInfo.itemTrack) then
-              if simData.simType == ns.enums.simTypes.raidbotDroptimizer then
-                local dif = ((simData.items[itemInfo.itemId].gain or 0)/(simData.baseline or 1)) * 100
-                local val = sformat("%s (%.2f%%)", simData.items[itemInfo.itemId].gain or 0, dif)
-                if simKey:lower():match(raidbotsMatchStr) then -- patchwork 1 target sim, not gonna find a better match (?) TODO maybe figure out something better, in theory there could be multiple
-                  return val, getSimLineColor(dif)
-                end
-                bestItem = val
-                bestDif = dif
-              elseif simData.simType == ns.enums.simTypes.qeLiveDroptimizer then
-                local val = sformat("%.2f%%", simData.items[itemInfo.itemId].gainPercent)
-                if simKey:lower():match(qeLiveMatchStr) then -- patchwork 1 target sim, not gonna find a better match (?) TODO maybe figure out something better, in theory there could be multiple
-                  return val, getSimLineColor(simData.items[itemInfo.itemId].gainPercent)
-                end
-                bestItem = val
-                bestDif = simData.items[itemInfo.itemId].gainPercent
-              else
-                bestItem = simData.items[itemInfo.itemId].gain
+          local entry = bestEntryFor(entriesForViewedItem(simData, itemInfo), itemInfo.itemTrack, simData.simType)
+          if entry then
+            if simData.simType == ns.enums.simTypes.raidbotDroptimizer then
+              local dif = ((entry.gain or 0)/(simData.baseline or 1)) * 100
+              local val = sformat("%s (%.2f%%)", entry.gain or 0, dif)
+              if simKey:lower():match(raidbotsMatchStr) then -- patchwork 1 target sim, not gonna find a better match (?) TODO maybe figure out something better, in theory there could be multiple
+                return val, getSimLineColor(dif)
               end
+              bestItem = val
+              bestDif = dif
+            elseif simData.simType == ns.enums.simTypes.qeLiveDroptimizer then
+              local pct = entry.gainPercent or 0
+              local val = sformat("%.2f%%", pct)
+              if simKey:lower():match(qeLiveMatchStr) then -- patchwork 1 target sim, not gonna find a better match (?) TODO maybe figure out something better, in theory there could be multiple
+                return val, getSimLineColor(pct)
+              end
+              bestItem = val
+              bestDif = pct
+            else
+              bestItem = entry.gain
             end
           end
         end
@@ -187,7 +251,11 @@ do
     end
     return nil
   end
+  ---0 means "no slot", both for items that have none (tier tokens) and for slot strings the import
+  ---could not parse. Comparing those as a value makes every unknown match every other unknown, so
+  ---a token would pull in whatever item happened to fail parsing.
   local function isMatchingSlot(slot1, slot2)
+    if not slot1 or not slot2 or slot1 == 0 or slot2 == 0 then return false end
     if slot1 == slot2 then return true end
     return ns.helpers.GetUniversalSlot(slot1) == ns.helpers.GetUniversalSlot(slot2)
   end
@@ -241,6 +309,39 @@ do
     return sformat("%+.0f", itemData.gain or 0), sformat("%+.2f%%", pct), pct
   end
 
+  ---How a piece is obtained when it is not a straight drop, nil when it is one. The card shows
+  ---this as the source's icon rather than words, so this is only used to tell results apart.
+  ---@param entry wowutilsDroptimizerData_droptimizerItem
+  ---@return string?
+  local function conversionKeyOf(entry)
+    local source = entry.sourceItem
+    if not source then return nil end
+    if source.catalyst then return "catalyst" end
+    return "source:" .. tostring(source.itemId)
+  end
+
+  ---What tells one result for an item apart from another within the same sim: how it is reached
+  ---(catalyst charge, tier token) when that differs, otherwise the slot it was simmed into.
+  ---@param entry wowutilsDroptimizerData_droptimizerItem
+  ---@return string?
+  local function entryLabelOf(entry)
+    return conversionKeyOf(entry) or ns.helpers.GetEquipmentSlotName(entry.equipmentSlot)
+  end
+
+  ---Marks a result the viewer cannot simply loot. Carried as ids, the tooltip turns them into
+  ---icons: the catalyst atlas, or the icon of the token the piece converts from.
+  ---@param row wowutils_tooltip_simRow|wowutils_tooltip_otherRow
+  ---@param entry wowutilsDroptimizerData_droptimizerItem
+  local function markSource(row, entry)
+    local source = entry.sourceItem
+    if not source then return end
+    if source.catalyst then
+      row.catalyst = true
+    else
+      row.sourceItemId = source.itemId
+    end
+  end
+
   ---@param wlItem wowutilsDroptimizerData_wishlistItem
   ---@return wowutils_tooltip_pick
   local function pickOf(wlItem)
@@ -265,7 +366,7 @@ do
     local droptimizerData = WowUtilsDB.droptimizerData[droptimizerKey]
     ns.Debug.AddToDevTool({ itemInfo = itemInfo, droptimizerData = droptimizerData }, "ns.rclc.BuildCandidateModel")
 
-    local shortName, realm = strsplit("-", candidateName)
+    local shortName, realm = ns.helpers.SplitFullName(candidateName)
     local classFile = UnitClassBase(Ambiguate(candidateName, "none"))
     if not classFile and droptimizerData and droptimizerData.class and droptimizerData.class > 0 then
       classFile = select(2, GetClassInfo(droptimizerData.class))
@@ -292,13 +393,35 @@ do
       noPlayerData = false,
     }
 
+    ---@type table<number, boolean>? pieces this character's sims reach through the looted item,
+    ---whether it is a token that becomes them or a base item the catalyst turns into one
+    local convertsInto
     if droptimizerData then
-      -- Wishlist: the viewed item first, then other picks in the same slot at this difficulty.
+      -- collected before the wishlist runs, both sections key off the same set
+      convertsInto = {}
+      for _, sims in pairs(droptimizerData.specs) do
+        for _, simData in pairs(sims) do
+          for itemId, entries in pairs(simData.items) do
+            for i = 1, #entries do
+              if convertsFrom(entries[i], itemInfo.itemId) then convertsInto[itemId] = true end
+            end
+          end
+        end
+      end
+    end
+
+    if droptimizerData then
+      -- Wishlist: the viewed item first, then other picks at this difficulty -- in the same slot,
+      -- or on anything the looted item converts into.
       for _, wlItem in pairs(droptimizerData.wishlist) do
-        if isMatchingSlot(wlItem.equipmentSlot, itemInfo.invSlotId) and isCorrectDif(wlItem.difficultyId, itemInfo.itemTrack) then
+        if isCorrectDif(wlItem.difficultyId, itemInfo.itemTrack) then
           if wlItem.itemId == itemInfo.itemId then
+            -- matched on the item itself, no slot involved. the rclc column does the same, and
+            -- filtering this through the slot as well used to hide a token's own pick from the card
             m.viewedPick = pickOf(wlItem)
-          else
+          elseif convertsInto and convertsInto[wlItem.itemId] then
+            tinsert(m.otherPicks, pickOf(wlItem))
+          elseif isMatchingSlot(wlItem.equipmentSlot, itemInfo.invSlotId) then
             tinsert(m.otherPicks, pickOf(wlItem))
           end
         end
@@ -308,33 +431,112 @@ do
       -- collapses to its single best result across all sims.
       ---@type table<number, wowutils_tooltip_otherRow>
       local bestOther = {}
+      -- one row per result rather than per sim: a sim can report the viewed item more than once
+      -- (both finger slots, catalyst as well as direct drop) and each is a real, different number.
+      -- rows stay grouped by the sim that produced them, best sim first.
+      ---a row paired with the sim result it was built from, which is what its label comes from
+      ---@class wowutils_rclc_simGroupRow
+      ---@field row wowutils_tooltip_simRow
+      ---@field entry wowutilsDroptimizerData_droptimizerItem
+      ---@field itemId number the item the result is for, which is not the looted one for a conversion
+      ---@field converts boolean? the result is something the looted item turns into, not the item itself
+
+      ---@type {rank: number, rows: wowutils_rclc_simGroupRow[]}[]
+      local simGroups = {}
+      local labelRows = false
       for specId, sims in pairs(droptimizerData.specs) do
         for simKey, simData in pairs(sims) do
           local source, profile, targets
-          for itemId, itemData in pairs(simData.items) do
-            ---@cast itemData wowutilsDroptimizerData_droptimizerItem
-            if isMatchingSlot(itemInfo.invSlotId, itemData.equipmentSlot) and isCorrectDif(itemData.difficultyId, itemInfo.itemTrack) then
-              if not source then source, profile, targets = parseSimKey(simKey) end
-              local gainText, pctText, pct = formatGain(simData, itemData)
-              if itemId == itemInfo.itemId then
-                tinsert(m.sims, {
-                  specId = specId,
-                  source = source,
-                  profile = profile,
-                  targets = targets,
-                  simmedAt = simData.simmedAt,
-                  gainText = gainText,
-                  pctText = pctText,
-                  pct = pct,
-                })
-              elseif not bestOther[itemId] or bestOther[itemId].pct < pct then
-                bestOther[itemId] = { itemId = itemId, simLabel = profile, gainText = gainText, pctText = pctText, pct = pct }
+          ---@type wowutils_rclc_simGroupRow[]
+          local rows = {}
+          -- only results for the item itself decide whether rows need telling apart. a conversion
+          -- is always named after what it produces, so it never makes the plain rows ambiguous
+          local plainRows = 0
+          for itemId, itemEntries in pairs(simData.items) do
+            for i = 1, #itemEntries do
+              local itemData = itemEntries[i]
+              if isCorrectDif(itemData.difficultyId, itemInfo.itemTrack) then
+                -- what the looted item turns into is a result *of* that item, not an alternative
+                -- to it: a token becoming a piece, or a base item the catalyst converts
+                local converts = convertsFrom(itemData, itemInfo.itemId)
+                local sameSlot = isMatchingSlot(itemInfo.invSlotId, itemData.equipmentSlot)
+                if converts or sameSlot then
+                  if not source then source, profile, targets = parseSimKey(simKey) end
+                  local gainText, pctText, pct = formatGain(simData, itemData)
+                  if converts or itemId == itemInfo.itemId then
+                    if not converts then plainRows = plainRows + 1 end
+                    tinsert(rows, {
+                      row = {
+                        specId = specId,
+                        source = source,
+                        profile = profile,
+                        targets = targets,
+                        simmedAt = simData.simmedAt,
+                        gainText = gainText,
+                        pctText = pctText,
+                        pct = pct,
+                      },
+                      entry = itemData,
+                      itemId = itemId,
+                      converts = converts or nil,
+                    })
+                  elseif not bestOther[itemId] or bestOther[itemId].pct < pct then
+                    local other = { itemId = itemId, simLabel = profile, gainText = gainText, pctText = pctText, pct = pct }
+                    markSource(other, itemData)
+                    bestOther[itemId] = other
+                  end
+                end
               end
             end
           end
+          if #rows > 0 then
+            -- once any sim splits into several rows every row gets labelled, the same way a mixed
+            -- source turns the source prefix on for all of them. one labelled row next to a bare
+            -- one reads like the bare one is missing something
+            if plainRows > 1 then labelRows = true end
+            table.sort(rows, function(x, y) return x.row.pct > y.row.pct end)
+            tinsert(simGroups, { rank = rows[1].row.pct, rows = rows })
+          end
         end
       end
-      table.sort(m.sims, function(x, y) return x.pct > y.pct end)
+      table.sort(simGroups, function(x, y) return x.rank > y.rank end)
+      for _, group in ipairs(simGroups) do
+        for i = 1, #group.rows do
+          local paired = group.rows[i]
+          local conversion = conversionKeyOf(paired.entry)
+          -- a conversion is marked whether or not anything is ambiguous, an unmarked row reads as
+          -- "this just drops"
+          if labelRows or conversion then
+            local label
+            if paired.converts then
+              -- this row is what the looted item becomes, so name that rather than the slot. it
+              -- converts from the item being looted, so repeating its icon would say nothing --
+              -- only whether the catalyst is involved adds anything
+              label = C_Item.GetItemNameByID(paired.itemId)
+                or ns.helpers.GetEquipmentSlotName(paired.entry.equipmentSlot)
+                or tostring(paired.itemId)
+              if paired.entry.sourceItem and paired.entry.sourceItem.catalyst then
+                paired.row.catalyst = true
+              end
+            else
+              -- a conversion carries its source icon instead of a word, so it needs no text label
+              markSource(paired.row, paired.entry)
+              label = not conversion and ns.helpers.GetEquipmentSlotName(paired.entry.equipmentSlot) or nil
+              -- two results that label the same (same slot, same source) are only told apart by
+              -- their item level, so fall back to it rather than showing two identical rows
+              for j = 1, #group.rows do
+                if j ~= i and label and label == entryLabelOf(group.rows[j].entry) then
+                  label = sformat("%s %s", label, paired.entry.ilvl)
+                  break
+                end
+              end
+            end
+            paired.row.entryLabel = label
+          end
+          tinsert(m.sims, paired.row)
+        end
+        m.simCount = (m.simCount or 0) + 1
+      end
       for _, row in pairs(bestOther) do tinsert(m.others, row) end
       table.sort(m.others, function(x, y) return x.pct > y.pct end)
       local maxOther = 6
@@ -503,8 +705,15 @@ end
 ---@return string droptimizerKey
 local function getRowKeys(name)
   local guid = UnitGUID(Ambiguate(name, "none"))
-  local n, s = strsplit("-", name)
-  return guid, sformat("%s-%s", n:lower(), ns.GetRealmId(nil, s))
+  -- A character we already hold data for built its own key from its own GetRealmID(), so take that
+  -- over rebuilding one from the realm name rclc hands us. Same thing publicAPI does with a guid.
+  local stored = guid and (WowUtilsDB.ownCharacters[guid] or WowUtilsDB.others[guid])
+  if stored and stored.droptimizerKey then
+    return guid, stored.droptimizerKey
+  end
+  local n, s = ns.helpers.SplitFullName(name)
+  local realmId = s and ns.GetRealmId(nil, s) or ns.me.realmId
+  return guid, sformat("%s-%s", n:lower(), realmId)
 end
 
 ---Hover on any of our cells shows the full per-candidate breakdown for the viewed item.

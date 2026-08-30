@@ -40,10 +40,15 @@ ns.tooltip = {}
 ---@field gainText string absolute gain, "" for percent-only sources
 ---@field pctText string
 ---@field pct number
+---@field entryLabel string? what tells this result apart from the sim's other results for the same item ("Ring 2"), only when some sim produced more than one. a conversion carries its source marker instead
+---@field catalyst boolean? the result is a catalyst conversion, drawn as the catalyst marker
+---@field sourceItemId number? the token this result converts from, drawn as that item's icon
 
 ---@class wowutils_tooltip_otherRow
 ---@field itemId number
 ---@field simLabel string
+---@field catalyst boolean? the item is a catalyst conversion, drawn as the catalyst marker before its name
+---@field sourceItemId number? the token this item converts from, drawn as that item's icon before its name
 ---@field gainText string
 ---@field pctText string
 ---@field pct number
@@ -58,7 +63,8 @@ ns.tooltip = {}
 ---@field candidate wowutils_tooltip_candidate
 ---@field viewedPick wowutils_tooltip_pick?
 ---@field otherPicks wowutils_tooltip_pick[]
----@field sims wowutils_tooltip_simRow[]
+---@field sims wowutils_tooltip_simRow[] one row per result, so several rows can come from the same sim
+---@field simCount number? distinct sims behind those rows, which is what the header counts
 ---@field others wowutils_tooltip_otherRow[]
 ---@field crests wowutils_tooltip_crest[]?
 ---@field crestsUpdated number?
@@ -304,6 +310,55 @@ end
 local function itemNameOf(itemId)
   return C_Item.GetItemNameByID(itemId) or UNKNOWN
 end
+---the catalyst marker, built once. the rows these go in have ~50px of slack, so a source has to
+---be shown as an inline icon rather than named
+local catalystMarkup
+local function catalystIcon()
+  if catalystMarkup == nil then
+    catalystMarkup = CreateAtlasMarkup("CreationCatalyst-32x32") or false
+  end
+  return catalystMarkup or ""
+end
+local sourceIconCache = {}
+---@param itemId number the token or base item a result converts from
+---@return string
+local function sourceItemIcon(itemId)
+  local cached = sourceIconCache[itemId]
+  if cached then return cached end
+  local icon = select(5, GetItemInfoInstant(itemId))
+  -- not in the client's cache yet. return nothing rather than caching the fallback icon forever,
+  -- the next draw picks it up
+  if not icon then return "" end
+  sourceIconCache[itemId] = CreateSimpleTextureMarkup(icon, ICON, ICON)
+  return sourceIconCache[itemId]
+end
+---How a result is obtained when it is not a drop: the catalyst atlas, or the source item's own
+---icon. Empty for anything that simply drops.
+---Falls back to words when an icon cannot be built -- a missing atlas or an item the client has
+---not cached yet would otherwise drop the fact that this is a conversion without a trace.
+---@param catalyst boolean?
+---@param sourceItemId number?
+---@return string
+local function sourceMarker(catalyst, sourceItemId)
+  if catalyst then
+    local icon = catalystIcon()
+    return icon ~= "" and icon or "Catalyst"
+  end
+  if sourceItemId then
+    local icon = sourceItemIcon(sourceItemId)
+    if icon ~= "" then return icon end
+    return C_Item.GetItemNameByID(sourceItemId) or "Token"
+  end
+  return ""
+end
+---@param itemId number
+---@param catalyst boolean?
+---@param sourceItemId number?
+local function itemNameWithSource(itemId, catalyst, sourceItemId)
+  local marker = sourceMarker(catalyst, sourceItemId)
+  if marker == "" then return itemNameOf(itemId) end
+  return sformat("%s %s", marker, itemNameOf(itemId))
+end
 local function itemIconOf(itemId)
   return select(5, GetItemInfoInstant(itemId)) or 134400
 end
@@ -382,7 +437,9 @@ end
 ---@param m wowutils_tooltip_model
 local function droptimizer(m, y)
   if #m.sims == 0 then return y end
-  y = eyebrow(y, "chart_no_axes_column", "Droptimizer", #m.sims == 1 and "1 sim" or sformat("%d sims", #m.sims))
+  -- rows are per result, the header counts the sims they came from
+  local simCount = m.simCount or #m.sims
+  y = eyebrow(y, "chart_no_axes_column", "Droptimizer", simCount == 1 and "1 sim" or sformat("%d sims", simCount))
   local maxAbs = 0
   local mixedSource = false
   for _, s in ipairs(m.sims) do
@@ -402,7 +459,13 @@ local function droptimizer(m, y)
     fs:SetPoint("TOPLEFT", card, "TOPLEFT", x, y - 2)
     local profileW = math.min(fs:GetStringWidth(), labelW)
     fs:SetWidth(profileW)
-    local tg = text(FONTS.small, s.targets, rgb(COLORS.muted))
+    -- a conversion shows its source icon, with no word for it. a slot label has no icon.
+    -- the marker leads: this text is width-clipped, and a marker on the tail is the first thing
+    -- to disappear on a long profile, which is exactly when the row still needs it
+    local marker = sourceMarker(s.catalyst, s.sourceItemId)
+    local sub = s.entryLabel and sformat("%s · %s", s.targets, s.entryLabel) or s.targets
+    if marker ~= "" then sub = sformat("%s %s", marker, sub) end
+    local tg = text(FONTS.small, sub, rgb(COLORS.muted))
     tg:SetPoint("TOPLEFT", card, "TOPLEFT", x + profileW + 6, y - 3)
     tg:SetWidth(math.max(0, labelW - profileW - 6))
     ledgerColumns(y, age(s.simmedAt), s.gainText, s.pctText, s.pct, maxAbs)
@@ -420,7 +483,7 @@ local function otherOptions(m, y)
   for _, o in ipairs(m.others) do
     plate(PAD, y - 1, ICON, itemIconOf(o.itemId), COLORS.border)
     local labelW = W - PAD * 2 - ICON - 6 - LEDGER_W - COL_GAP
-    local fs = text(FONTS.body, itemNameOf(o.itemId), rgb(COLORS.fg))
+    local fs = text(FONTS.body, itemNameWithSource(o.itemId, o.catalyst, o.sourceItemId), rgb(COLORS.fg))
     fs:SetPoint("TOPLEFT", card, "TOPLEFT", PAD + ICON + 6, y - 2)
     local nameW = math.min(fs:GetStringWidth(), labelW - 60)
     fs:SetWidth(nameW)
