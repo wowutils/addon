@@ -2,13 +2,14 @@
 ## Title: WowUtils
 ## Notes: WowUtils data caching
 ## Author: Ironi
-## Version: 1.0.7
+## Version: @project-version@
 ## IconTexture: Interface\AddOns\wowutils\media\logo.png
 ## DefaultState: enabled
 ## LoadSavedVariablesFirst: 1
 ## SavedVariables: WowUtilsDB
 ## Category: wowutils
 ## OptionalDeps: RCLootCouncil, wowutils_data
+## X-Curse-Project-ID: 1620704
 
 embeds.xml
 enums.lua
