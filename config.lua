@@ -19,6 +19,7 @@ ns.config = {
   currentDBVersion = 3, -- 3: sim items are keyed itemId -> array of entries, so a sim can report the same item for more than one slot/source
   configVersion = 6, -- >= 5 - payloads are zlib wrapped
   droptimizerKeepTime = 14*24*60*60, -- 14 days. shared by the import and the cleanup sweep so the two can't fight over the same sims
+  itemCacheSync = false, -- temporarily disabled, items are still cached locally but not sent, requested or accepted
   guiIlvlFilter = 250, -- roster "Hide Low ilvl characters" cutoff, compared against the median watermark
   watermarks = {
     startingPoint = 250,

@@ -398,6 +398,37 @@ do
     if char.dataRefreshTimes ~= nil and type(char.dataRefreshTimes) ~= "table" then char.dataRefreshTimes = nil end
   end
 end
+
+---a guid change (race/faction change, delete + recreate) keeps the droptimizerKey, so the same key can
+---turn up under two guids. the stale one never updates itself again, but whoever still holds it keeps
+---relaying it around the guild and resetting its expiry. keep only the freshest record per key.
+---lastUpdate is written by the character itself, so it's comparable across guids (summed timestamps aren't)
+---@param guid string guid the incoming record is about to be stored under
+---@param key string? droptimizerKey of the incoming record
+---@param lastUpdate number? lastUpdate of the incoming record
+---@return boolean accept false when a record under another guid with the same key is at least as fresh
+function ns.database.ResolveKeyConflict(guid, key, lastUpdate)
+  if type(key) ~= "string" then return true end
+  lastUpdate = type(lastUpdate) == "number" and lastUpdate or 0
+  -- own characters count as competitors too, so a relayed copy of our own old guid is rejected, but they
+  -- are never deleted from here: if someone else took a deleted character's name, their newer data wins
+  for _, chars in ipairs({ WowUtilsDB.ownCharacters, WowUtilsDB.others }) do
+    for otherGuid, char in pairs(chars) do
+      if otherGuid ~= guid and char.droptimizerKey == key and (char.lastUpdate or 0) >= lastUpdate then
+        WowUtilsDB.others[guid] = nil -- our copy under the incoming guid is just as stale
+        ns.Debug.print("dropping '%s' for key '%s', '%s' is fresher", guid, key, otherGuid)
+        return false
+      end
+    end
+  end
+  for otherGuid, char in pairs(WowUtilsDB.others) do
+    if otherGuid ~= guid and char.droptimizerKey == key then
+      ns.Debug.print("removing stale guid '%s' for key '%s', replaced by '%s'", otherGuid, key, guid)
+      WowUtilsDB.others[otherGuid] = nil -- clearing an existing field mid pairs() is fine
+    end
+  end
+  return true
+end
 for _, char in pairs(WowUtilsDB.others) do
   ns.database.NormalizeCharRecord(char)
 end
@@ -776,6 +807,32 @@ do
     end
   end
   for k,v in pairs(toDelete) do
+    WowUtilsDB.others[k] = nil
+  end
+  wipe(toDelete)
+  -- same character under several guids (see ns.database.ResolveKeyConflict), sweep up whatever got stored
+  -- before that check existed. the guid we're logged in on is the live one for our own key
+  for guid, char in pairs(WowUtilsDB.ownCharacters) do
+    if guid ~= ns.me.guid and char.droptimizerKey == ns.me.droptimizerKey then
+      WowUtilsDB.ownCharacters[guid] = nil
+    end
+  end
+  local freshest = {} -- droptimizerKey -> char
+  for _, chars in ipairs({ WowUtilsDB.ownCharacters, WowUtilsDB.others }) do
+    for _, char in pairs(chars) do
+      local key = char.droptimizerKey
+      if key and (not freshest[key] or (char.lastUpdate or 0) > (freshest[key].lastUpdate or 0)) then
+        freshest[key] = char
+      end
+    end
+  end
+  for guid, char in pairs(WowUtilsDB.others) do
+    if char.droptimizerKey and freshest[char.droptimizerKey] ~= char then
+      toDelete[guid] = true
+    end
+  end
+  for k in pairs(toDelete) do
+    ns.Debug.print("removing duplicate guid '%s' for key '%s'", k, WowUtilsDB.others[k].droptimizerKey)
     WowUtilsDB.others[k] = nil
   end
   wipe(toDelete)

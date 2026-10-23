@@ -280,6 +280,7 @@ ns.mapping = {
       -- might as well update since someone is sending it
       local t = ns.mapping.SafeDeserializeCBOR(cborStr)
       if type(t) ~= "table" then return end
+      if not ns.database.ResolveKeyConflict(targetGuid, t.droptimizerKey, t.lastUpdate) then return end
       if not WowUtilsDB.others[targetGuid] then
         ---@diagnostic disable-next-line: missing-fields
         WowUtilsDB.others[targetGuid] = {}
@@ -485,6 +486,8 @@ ns.mapping = {
       ---@cast t wowutils_otherChar
       -- the merge below compares and copies these fields, so they need the right types before anything reads them
       ns.database.NormalizeCharRecord(t)
+      -- relays are how a stale guid kept coming back, see ns.database.ResolveKeyConflict
+      if not ns.database.ResolveKeyConflict(targetGuid, t.droptimizerKey, t.lastUpdate) then return end
       if not c then
         WowUtilsDB.others[targetGuid] = t
         if dataQueue[currentUsage.itemCache][targetGuid] then
@@ -605,6 +608,7 @@ ns.mapping = {
       db.lastUpdateReceived = GetServerTime()
     end,
     [currentUsage.itemCache] = function(configVersion, dbVersion, str, db, partialGuid, channel, sender) -- P
+      if not ns.config.itemCacheSync then return end
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       local targetGuid = ns.mapping.ConvertPartialGuidToGuid(partialGuid)
       ns.Debug.print("receiving item sync From DB '%s' - sender '%s'", targetGuid, sender)

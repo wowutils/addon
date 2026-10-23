@@ -214,15 +214,24 @@ function private.whitelistDataUpdateCheck()
         slugToId[v] = k
       end
       local temp = {}
-      for guid, charData in pairs(WowUtilsDB.others) do -- TODO build slug to guid list somewhere thats kept up to date when new data is getting in (in theory slug can have multiple guids which makes it awkward)
-        if charData.droptimizerKey and slugToId[charData.droptimizerKey] then
-          found[slugToId[charData.droptimizerKey]] = true
-          table.insert(temp, {id = slugToId[charData.droptimizerKey], timestamp = ns.mapping.GetCharacterTimestampsForWideSync(charData), itemTimestamp = ns.mapping.timestamp.ToValue(charData.itemCacheUpdated or 0)})
+      -- 0 means "send everything" to the receiver, so with item sync off claim a far future timestamp instead
+      local noItemsTimestamp = not ns.config.itemCacheSync and 999999999 or nil
+      -- one entry per id: a key under two guids would otherwise go out twice, and the stale entry gets
+      -- answered with a full sync every time. ResolveKeyConflict should keep that from happening, this is the backstop
+      local freshest = {} -- id -> charData
+      for _, charData in pairs(WowUtilsDB.others) do -- TODO build slug to guid list somewhere thats kept up to date when new data is getting in
+        local id = charData.droptimizerKey and slugToId[charData.droptimizerKey]
+        if id and (not freshest[id] or (charData.lastUpdate or 0) > (freshest[id].lastUpdate or 0)) then
+          freshest[id] = charData
         end
+      end
+      for id, charData in pairs(freshest) do
+        found[id] = true
+        table.insert(temp, {id = id, timestamp = ns.mapping.GetCharacterTimestampsForWideSync(charData), itemTimestamp = noItemsTimestamp or ns.mapping.timestamp.ToValue(charData.itemCacheUpdated or 0)})
       end
       for k,v in pairs(slugToId) do
         if not found[v] and not ns.database.ownSlugs[k] then
-          table.insert(temp, {id = v, timestamp = 0, itemTimestamp = 0})
+          table.insert(temp, {id = v, timestamp = 0, itemTimestamp = noItemsTimestamp or 0})
         end
       end
       local str = ns.mapping.GetMsgData(ns.enums.context.whitelistCharSyncRequest, temp, nil, listId)
@@ -515,6 +524,7 @@ do
   local delayedSends = {}
   ---@param data wowutils_ownChar|wowutils_otherChar
   function ns.communication.SendItemsFromSpecificCharacter(data)
+    if not ns.config.itemCacheSync then return end
     local sinceLast = GetTime() - (cache[data.guid] or 0)
     if sinceLast < 5 then
       -- don't drop it, a change right after a send would otherwise never go out. data is the live db
