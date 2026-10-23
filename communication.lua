@@ -3,7 +3,7 @@
 
 ---@type string, wowutilsPrivate
 local addon_name, ns = ...
-local tinsert, tconcat, sformat, CompressString, DecompressString, SerializeCBOR, DeserializeCBOR, EncodeBase64, DecodeBase64 = table.insert, table.concat, string.format, C_EncodingUtil.CompressString, C_EncodingUtil.DecompressString, C_EncodingUtil.SerializeCBOR, C_EncodingUtil.DeserializeCBOR, C_EncodingUtil.EncodeBase64, C_EncodingUtil.DecodeBase64
+local tinsert, tremove, tconcat, sformat, CompressString, DecompressString, SerializeCBOR, DeserializeCBOR, EncodeBase64, DecodeBase64 = table.insert, table.remove, table.concat, string.format, C_EncodingUtil.CompressString, C_EncodingUtil.DecompressString, C_EncodingUtil.SerializeCBOR, C_EncodingUtil.DeserializeCBOR, C_EncodingUtil.EncodeBase64, C_EncodingUtil.DecodeBase64
 
 local prefixes = {
   normal = "wowutilsS",
@@ -340,6 +340,35 @@ function private.prepString(str, sending)
   return decompressed
 end
 
+-- one message at a time, CTL bursting everything at once gets us chat throttled
+local CHUNKS_PER_SEC = 2
+local outgoing, sending = {}, false
+
+function private.sendNext()
+  if sending or ns.restrictedAddonMessages or not outgoing[1] then return end
+  local msg = tremove(outgoing, 1)
+  sending = true
+  aceComms:SendCommMessage(msg.prefix, msg.text, msg.channel, nil, msg.prio, function(_, sent, total, didSend)
+    if not didSend then msg.failed = true end
+    if sent < total then return end
+    local delay = math.ceil(#msg.text / 254) / CHUNKS_PER_SEC
+    if msg.failed and (msg.retries or 0) < 3 then -- a lost chunk breaks the whole message, send it again
+      msg.failed, msg.retries = nil, (msg.retries or 0) + 1
+      tinsert(outgoing, 1, msg)
+      delay = delay + 5
+    end
+    C_Timer.After(delay, function()
+      sending = false
+      private.sendNext()
+    end)
+  end)
+end
+
+function private.queueSend(prefix, text, channel, prio)
+  tinsert(outgoing, { prefix = prefix, text = text, channel = channel, prio = prio })
+  private.sendNext()
+end
+
 ---@param addonMessagesType wowutils_enums_addonMessageTypes
 ---@param uncompressedMsg string
 ---@param prefChannel "instance_chat"|"raid"|"party"|"guild"
@@ -369,10 +398,10 @@ function private.sendAddonMessage(addonMessagesType, uncompressedMsg, prefChanne
   local prefix = private.getCorrectPrefixForType(addonMessagesType)
   if not prefix then return end
   if prefix == prefixes.updateChecker then
-    aceComms:SendCommMessage(prefix, private.addVersionsToCompressedString(addonMessagesType, uncompressedMsg, target, isCbor), prefChannel, nil, msgPrioForPrexies[prefix])
+    private.queueSend(prefix, private.addVersionsToCompressedString(addonMessagesType, uncompressedMsg, target, isCbor), prefChannel, msgPrioForPrexies[prefix])
     return
   end
-  aceComms:SendCommMessage(prefix, private.addVersionsToCompressedString(addonMessagesType, private.prepString(uncompressedMsg, true), target, isCbor), prefChannel, nil, msgPrioForPrexies[prefix])
+  private.queueSend(prefix, private.addVersionsToCompressedString(addonMessagesType, private.prepString(uncompressedMsg, true), target, isCbor), prefChannel, msgPrioForPrexies[prefix])
 end
 
 function ns.communication.AddonMessageRestrictionsLifted()
@@ -382,13 +411,14 @@ function ns.communication.AddonMessageRestrictionsLifted()
     local channel = private.confimChannel(data.prefChannel)
     if prefix and channel then
       if prefix == prefixes.updateChecker then
-        aceComms:SendCommMessage(prefix, private.addVersionsToCompressedString(data.addonMessageType, data.uncompressedMsg, data.target, data.isCbor), channel, nil, msgPrioForPrexies[prefix])
+        private.queueSend(prefix, private.addVersionsToCompressedString(data.addonMessageType, data.uncompressedMsg, data.target, data.isCbor), channel, msgPrioForPrexies[prefix])
       else
-        aceComms:SendCommMessage(prefix, private.addVersionsToCompressedString(data.addonMessageType, private.prepString(data.uncompressedMsg, true), data.target, data.isCbor), channel, nil, msgPrioForPrexies[prefix])
+        private.queueSend(prefix, private.addVersionsToCompressedString(data.addonMessageType, private.prepString(data.uncompressedMsg, true), data.target, data.isCbor), channel, msgPrioForPrexies[prefix])
       end
     end
   end
   wipe(private.queue)
+  private.sendNext()
 end
 
 do
