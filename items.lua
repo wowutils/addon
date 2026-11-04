@@ -66,7 +66,12 @@ do
     return false
   end
 end
----@type table<wowutils_enums_itemCacheType, table<string, wowutils_itemcache>>
+---@class wowutils_scannedItem
+---@field itemLink string
+---@field equipped number?
+---@field warbound boolean?
+
+---@type table<wowutils_enums_itemCacheType, table<string, wowutils_scannedItem>> -- string = itemGuid, only kept while scanning, saved through saveItemsIfChanged
 local tempItemCache = {
   [ns.enums.itemCacheType.equipped] = {},
   [ns.enums.itemCacheType.bags] = {},
@@ -83,7 +88,7 @@ local function handleItemOnLoad(item, target, itemLink, instantItemData)
   --some sections only care about epic items
   local isEpicItem = item:GetItemQuality() == Enum.ItemQuality.Epic
   local itemLevel = item:GetCurrentItemLevel()
-  local isLowItemLevel = (itemLevel or 0) < ns.config.guiIlvlFilter
+  local isLowItemLevel = (itemLevel or 0) < ns.config.itemCacheMinIlvl
   local potentialIgnore = isLowItemLevel or not isEpicItem
   local cache = tempItemCache[target]
   if target == ns.enums.itemCacheType.warbank then
@@ -128,13 +133,52 @@ local function handleItemOnLoad(item, target, itemLink, instantItemData)
     return
   end
 end
+local scannedItems = {} -- reused between scans, only copied when something changed
+---converts the guid keyed scan cache to the saved format and passes it forward only if something changed
+---@param target wowutils_enums_itemCacheType
+local function saveItemsIfChanged(target)
+  local isEquipped = target == ns.enums.itemCacheType.equipped
+  wipe(scannedItems)
+  for _, v in pairs(tempItemCache[target]) do
+    if isEquipped then
+      scannedItems[v.equipped] = ns.mapping.itemLink.ToValue(v.itemLink)
+    else
+      scannedItems[#scannedItems + 1] = (v.warbound and "W" or "") .. ns.mapping.itemLink.ToValue(v.itemLink)
+    end
+  end
+  if not isEquipped then table.sort(scannedItems) end -- items load in random order, sort so the same items always compare equal
+  local charDB = ns.database.GetCurrentCharDB()
+  local saved = charDB.itemCache2 and charDB.itemCache2[target]
+  if saved then
+    local changed = false
+    if isEquipped then -- slots are a fixed range, so one pass covers items added, removed and changed
+      for slot = INVSLOT_FIRST_EQUIPPED, INVSLOT_LAST_EQUIPPED do
+        if scannedItems[slot] ~= saved[slot] then
+          changed = true
+          break
+        end
+      end
+    elseif #scannedItems ~= #saved then
+      changed = true
+    else -- both sorted and same length
+      for i = 1, #scannedItems do
+        if scannedItems[i] ~= saved[i] then
+          changed = true
+          break
+        end
+      end
+    end
+    if not changed then return end
+  end
+  ns.database.SaveToCurrentCharacterDB(ns.enums.context.itemCache, target, CopyTable(scannedItems))
+end
 
 do
   local function clearSlot(slot)
     for k,v in pairs(tempItemCache[ns.enums.itemCacheType.equipped]) do
       if v.equipped == slot then
         tempItemCache[ns.enums.itemCacheType.equipped][k] = nil
-        ns.database.SaveToCurrentCharacterDB(ns.enums.context.itemCache, ns.enums.itemCacheType.equipped, tempItemCache[ns.enums.itemCacheType.equipped])
+        saveItemsIfChanged(ns.enums.itemCacheType.equipped)
         return
       end
     end
@@ -152,7 +196,7 @@ do
     if item:IsItemEmpty() then return end
     item:ContinueOnItemLoad(function()
       handleItemOnLoad(item, ns.enums.itemCacheType.equipped, slot)
-      ns.database.SaveToCurrentCharacterDB(ns.enums.context.itemCache, ns.enums.itemCacheType.equipped, tempItemCache[ns.enums.itemCacheType.equipped])
+      saveItemsIfChanged(ns.enums.itemCacheType.equipped)
     end)
     ns.items.CacheWatermarks()
   end
@@ -182,7 +226,7 @@ do
     if bankTimer then bankTimer:Cancel() end
     -- give 2s leeway to caching items before redirecting it forward
     bankTimer = C_Timer.NewTimer(2, function()
-      ns.database.SaveToCurrentCharacterDB(ns.enums.context.itemCache, ns.enums.itemCacheType.bank, tempItemCache[ns.enums.itemCacheType.bank])
+      saveItemsIfChanged(ns.enums.itemCacheType.bank)
     end)
   end
 end
@@ -218,7 +262,7 @@ do
     if bagTimer then bagTimer:Cancel() end
     -- give 2s leeway to caching items before redirecting it forward
     bagTimer = C_Timer.NewTimer(2, function()
-      ns.database.SaveToCurrentCharacterDB(ns.enums.context.itemCache, ns.enums.itemCacheType.bags, tempItemCache[ns.enums.itemCacheType.bags])
+      saveItemsIfChanged(ns.enums.itemCacheType.bags)
     end)
     -- in case we changed bank items, this function is checking if we can actually view bank or not
     private.ScanBank()
@@ -255,7 +299,7 @@ do
     if fullscanTimer then fullscanTimer:Cancel() end
     -- give 2s leeway to caching items before redirecting it forward
     fullscanTimer = C_Timer.NewTimer(2, function()
-      ns.database.SaveToCurrentCharacterDB(ns.enums.context.itemCache, ns.enums.itemCacheType.equipped, tempItemCache[ns.enums.itemCacheType.equipped])
+      saveItemsIfChanged(ns.enums.itemCacheType.equipped)
     end)
     ns.items.CacheWatermarks()
   end

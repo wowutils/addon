@@ -120,7 +120,7 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@field bonusCoinScannedHistory table<number, wowutils_bonuscoinMissingItems[]> -- specID = missingItems[]
 ---@field bonusCoinScannedHistoryUpdated number
 ---@field addonVersion string
----@field itemCache table<wowutils_enums_itemCacheType, table<string, wowutils_itemcache>> -- string = itemGuid
+---@field itemCache2 table<wowutils_enums_itemCacheType, wowutils_itemcache>
 ---@field itemCacheUpdated number
 ---@field lockouts number? raid lockout mask, layout from ns.config.lockouts, a set bit means the boss is still available. nil = never scanned
 ---@field lockoutsUpdated number
@@ -203,10 +203,7 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@field itemId number
 ---@field note? string
 
----@class wowutils_itemcache
----@field equipped number?
----@field itemLink string
----@field warbound boolean?
+---@alias wowutils_itemcache table<number, string> item strings without the "item:" prefix, crafter or trailing colons. equipped: slot = item, others: sorted array with "W" prefix for warbound items
 
 ---@type wowutils_options_notifications
 local notificationDefaults = {
@@ -369,6 +366,17 @@ if db.dbVersion < ns.config.currentDBVersion then
     -- sourceItem at all. without a re-read nothing would know a piece comes from the catalyst
     -- until the source file next happens to change
     ns.forceDroptimizerReimport = true
+  end
+  if db.dbVersion < 4 then
+    -- itemCache (guid keyed full links) was replaced by itemCache2, drop the old data and its timestamp
+    -- so nobody thinks they already have up to date items
+    for _, chars in pairs({ db.ownCharacters, db.others }) do
+      for _, charData in pairs(chars) do
+        ---@diagnostic disable-next-line: inject-field
+        charData.itemCache = nil
+        charData.itemCacheUpdated = nil
+      end
+    end
   end
 end
 charDB.addonVersion = C_AddOns.GetAddOnMetadata(addon_name, "Version")
@@ -693,40 +701,9 @@ function ns.database.SaveToCurrentCharacterDB(context, id, data)
   if context == ns.enums.context.itemCache then
     ---@cast data wowutils_itemcache
     ---@cast id wowutils_enums_itemCacheType
-    -- data is also used as cache in the source functions, so we need to copy it to SV instead of using as is
-    if not charDB.itemCache then
-      charDB.itemCache = {[id] = CopyTable(data)}
-      contextUpdated(context)
-      return
-    end
-    if not charDB.itemCache[id] then
-      charDB.itemCache[id] = CopyTable(data)
-      contextUpdated(context)
-      return
-    end
-    local changed = false
-    -- check if some of the old items is missing from new data first
-    for ig, v in pairs(charDB.itemCache[id]) do
-      if not data[ig] then
-        changed = true
-        break
-      end
-    end
-    -- check if there are new items, or one of the old items was changed
-    if not changed then
-      for ig,v in pairs(data) do
-        if not charDB.itemCache[id][ig] then
-          changed = true
-          break
-        end
-        if charDB.itemCache[id][ig].equipped ~= v.equipped or charDB.itemCache[id][ig].itemLink ~= v.itemLink then
-          changed = true
-          break
-        end
-      end
-    end
-    if not changed then return end
-    charDB.itemCache[id] = CopyTable(data)
+    -- items.lua only calls this when something actually changed
+    if not charDB.itemCache2 then charDB.itemCache2 = {} end
+    charDB.itemCache2[id] = data
     contextUpdated(context)
     return
   end

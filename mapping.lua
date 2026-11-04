@@ -30,6 +30,20 @@ local function readCborPayload(str)
   return timestamp, str:sub(2 + timestampLength)
 end
 
+---received item caches go straight into SV for outside readers, so only accept the exact shape they expect
+---@param t any
+---@return boolean
+local function isValidItemCache(t)
+  if type(t) ~= "table" then return false end
+  for cacheType, items in pairs(t) do
+    if type(cacheType) ~= "string" or type(items) ~= "table" then return false end
+    for k, v in pairs(items) do
+      if type(k) ~= "number" or type(v) ~= "string" then return false end
+    end
+  end
+  return true
+end
+
 local alreadyCheckedAddonVersions = {}
 local function checkVersionForUpdate(versionStr, sender)
   if not versionStr then return end
@@ -144,6 +158,7 @@ local fullSyncChecks = {
 ---@field ConvertGuidToMsgFormat fun(guid:string):string
 ---@field ConvertPartialGuidToGuid fun(partialGuid:string):string
 ---@field SafeDeserializeCBOR fun(cborStr:string?):table?
+---@field ReadCborPayload fun(str:string):number?, string?
 ns.mapping = {
   toRealData = {
     [currentUsage.watermarks] = function(configVersion, dbVersion, str, db, targetGuid, channel) -- A
@@ -260,6 +275,7 @@ ns.mapping = {
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       local timestamp, cborStr = readCborPayload(str)
       if not timestamp then return end
+      ns.communication.DropSupersededFromQueue(ns.enums.context.droptimizerData, key, timestamp)
       ns.Debug.print("receiving droptimizer data for '%s'", key)
       if WowUtilsDB.droptimizerData[key] and WowUtilsDB.droptimizerData[key].lastUpdate >= timestamp then return end -- already have newer data
       local t = ns.mapping.SafeDeserializeCBOR(cborStr)
@@ -285,7 +301,7 @@ ns.mapping = {
         ---@diagnostic disable-next-line: missing-fields
         WowUtilsDB.others[targetGuid] = {}
         if dataQueue[currentUsage.itemCache][targetGuid] then
-          WowUtilsDB.others[targetGuid].itemCache = dataQueue[currentUsage.itemCache][targetGuid].data
+          WowUtilsDB.others[targetGuid].itemCache2 = dataQueue[currentUsage.itemCache][targetGuid].data
           WowUtilsDB.others[targetGuid].itemCacheUpdated = dataQueue[currentUsage.itemCache][targetGuid].updated
           dataQueue[currentUsage.itemCache][targetGuid] = nil
         end
@@ -472,9 +488,11 @@ ns.mapping = {
       if configVersion < 6 then return end
       local targetGuid = ns.mapping.ConvertPartialGuidToGuid(partialGuid)
       ns.Debug.print("receiving full character sync From DB '%s' - sender '%s'", targetGuid, sender)
-      if WowUtilsDB.ownCharacters[targetGuid] then return end -- don't accept syncs about own chars
       local timestamp, cborStr = readCborPayload(str)
       if not timestamp then return end
+      -- before the own chars check, we might have a relay of one of our alts queued too
+      ns.communication.DropSupersededFromQueue(ns.enums.context.fullCharacterSyncFromDB, targetGuid, timestamp)
+      if WowUtilsDB.ownCharacters[targetGuid] then return end -- don't accept syncs about own chars
       local c = WowUtilsDB.others[targetGuid]
       if c then
         if ns.mapping.GetCharacterTimestampsForWideSync(c) >= timestamp then
@@ -491,7 +509,7 @@ ns.mapping = {
       if not c then
         WowUtilsDB.others[targetGuid] = t
         if dataQueue[currentUsage.itemCache][targetGuid] then
-          WowUtilsDB.others[targetGuid].itemCache = dataQueue[currentUsage.itemCache][targetGuid].data
+          WowUtilsDB.others[targetGuid].itemCache2 = dataQueue[currentUsage.itemCache][targetGuid].data
           WowUtilsDB.others[targetGuid].itemCacheUpdated = dataQueue[currentUsage.itemCache][targetGuid].updated
           dataQueue[currentUsage.itemCache][targetGuid] = nil
         end
@@ -519,6 +537,7 @@ ns.mapping = {
       local timestamp, rest = readCborPayload(str)
       if not timestamp then return end
       local listId, cborStr = strsplit("^", rest, 2)
+      ns.communication.DropSupersededFromQueue(ns.enums.context.fullSynclistInformation, listId, timestamp)
       ns.Debug.print("receiving syncList '%s' - from '%s'", listId, partialGuid)
       if WowUtilsDB.syncLists[listId] and WowUtilsDB.syncLists[listId].lastUpdate >= timestamp then
         ns.Debug.print("already have newer data from synclist '%s'", listId)
@@ -612,15 +631,17 @@ ns.mapping = {
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       local targetGuid = ns.mapping.ConvertPartialGuidToGuid(partialGuid)
       ns.Debug.print("receiving item sync From DB '%s' - sender '%s'", targetGuid, sender)
-      if WowUtilsDB.ownCharacters[targetGuid] then return end -- don't accept syncs about own chars
       local timestamp, cborStr = readCborPayload(str)
       if not timestamp then return end
+      -- before the own chars check, we might have a relay of one of our alts queued too
+      ns.communication.DropSupersededFromQueue(ns.enums.context.itemCache, targetGuid, timestamp)
+      if WowUtilsDB.ownCharacters[targetGuid] then return end -- don't accept syncs about own chars
       if not db then
         db = confirmAndReturnDBForChar(targetGuid, channel)
         if not db then
           if (dataQueue[currentUsage.itemCache][targetGuid] and dataQueue[currentUsage.itemCache][targetGuid].updated or 0) > timestamp then return end
           local t = ns.mapping.SafeDeserializeCBOR(cborStr)
-          if not t then return end
+          if not isValidItemCache(t) then return end
           dataQueue[currentUsage.itemCache][targetGuid] = {
             updated = timestamp,
             data = t,
@@ -633,9 +654,9 @@ ns.mapping = {
         return
       end
       local t = ns.mapping.SafeDeserializeCBOR(cborStr)
-      if not t then return end
-      ---@cast t wowutils_itemcache
-      db.itemCache = t
+      if not isValidItemCache(t) then return end
+      ---@cast t table<wowutils_enums_itemCacheType, wowutils_itemcache>
+      db.itemCache2 = t
       db.itemCacheUpdated = timestamp
       -- missing .lastUpdateReveived for a reason, itemCache is not important enough to set that, we get what we get and thats it
     end,
@@ -965,6 +986,22 @@ do
     end,
   }
 end
+do
+  local cache = {} -- full link -> short version, scans see the same links over and over
+  ns.mapping.itemLink = {
+    ---strips hyperlink, crafter guid and trailing empty fields, bonus ids etc. are kept as is
+    ---prefix with "item:" to get an usable itemString back
+    ---@param link string
+    ---@return string
+    ToValue = function(link)
+      if cache[link] then return cache[link] end
+      local v = link:match("|Hitem:([^|]+)|h") or link:match("^item:(.+)$") or link
+      v = v:gsub("Player%-%d+%-%x+", ""):gsub(":+$", "")
+      cache[link] = v
+      return v
+    end,
+  }
+end
 ns.mapping.timestamp = {
   ---convert to msg format
   ---@param timestamp number
@@ -1048,7 +1085,7 @@ local function cleanUpCharacterDBBeforeSending(data)
     t.lastUpdateReceived = nil
     t.lastLogout = nil
   end
-  t.itemCache = nil -- we don't want to send item cache through this, it will be sent through different (low prio) channel
+  t.itemCache2 = nil -- we don't want to send item cache through this, it will be sent through different (low prio) channel
   t.itemCacheUpdated = nil
   return t
 end
@@ -1200,7 +1237,7 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
   if context == ns.enums.context.itemCache then
     ---@cast data wowutils_ownChar|wowutils_otherChar
     local lastUpdate = tostring(data.itemCacheUpdated or 0)
-    return sformat("%s%s%s%s", currentUsage.itemCache, string.char(#lastUpdate), lastUpdate, SerializeCBOR(data.itemCache))
+    return sformat("%s%s%s%s", currentUsage.itemCache, string.char(#lastUpdate), lastUpdate, SerializeCBOR(data.itemCache2))
   end
   if context == ns.enums.context.craftingOrders then
     ---@cast data table<number, wowutils_craftingOrderProfession>
@@ -1236,3 +1273,5 @@ end
 function ns.mapping.ConvertPartialGuidToGuid(partialGuid)
   return "Player-" .. partialGuid
 end
+
+ns.mapping.ReadCborPayload = readCborPayload

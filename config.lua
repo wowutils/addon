@@ -16,10 +16,11 @@ ns.hasDataAddon = WowUtilsPublicDataAPI and true or false
 ---@class wowutils_config
 ns.config = {
   timestampOffset = 1767225600, -- 	01/01/26 00:00:00 UTC
-  currentDBVersion = 3, -- 3: sim items are keyed itemId -> array of entries, so a sim can report the same item for more than one slot/source
+  currentDBVersion = 4, -- 3: sim items are keyed itemId -> array of entries, so a sim can report the same item for more than one slot/source, 4: itemCache replaced by itemCache2 (short item strings)
   configVersion = 6, -- >= 5 - payloads are zlib wrapped
   droptimizerKeepTime = 14*24*60*60, -- 14 days. shared by the import and the cleanup sweep so the two can't fight over the same sims
-  itemCacheSync = false, -- temporarily disabled, items are still cached locally but not sent, requested or accepted
+  itemCacheSync = true, -- temporarily disabled, items are still cached locally but not sent, requested or accepted
+  itemCacheMinIlvl = 292, -- items below this are left out of the item cache, equipped items are always cached
   guiIlvlFilter = 250, -- roster "Hide Low ilvl characters" cutoff, compared against the median watermark
   watermarks = {
     startingPoint = 250,

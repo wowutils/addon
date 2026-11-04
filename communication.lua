@@ -73,7 +73,17 @@ ns.communication.msgHandlers[prefixes.normal] = function(prefix, msg, channel, s
   end
   if isCbor == "1" then                                               -- we dont wanna do any extra splitting for these strings, instead let specficic handler handle them
     if msgType == ns.enums.addonMessagesTypes.droptimizerData then
-      if idType == "T" and id ~= ns.me.droptimizerKey then return end -- targeted droptimizerData sync, but not for me, could probably just catch these in the future?
+      if idType == "T" and id ~= ns.me.droptimizerKey then -- targeted droptimizerData sync, but not for me
+        -- someone else answered the same update check we might have an answer queued for, only decode when we do
+        if private.hasSupersedeFor(ns.enums.context.droptimizerData, id) then
+          local dataString = private.prepString(compressedData, false)
+          local timestamp = dataString and ns.mapping.ReadCborPayload(dataString:sub(2))
+          if timestamp then
+            ns.communication.DropSupersededFromQueue(ns.enums.context.droptimizerData, id, timestamp)
+          end
+        end
+        return
+      end
     end
     local dataString = private.prepString(compressedData, false)
     if not dataString then return end
@@ -173,6 +183,7 @@ if ns.hasDataAddon then
     end
   end
 end
+---@type table<string, wowutils_queueEntry>
 private.queue = {}
 private.groupChannels = {
   --[ns.enums.chatChannels.instance] = true,
@@ -193,8 +204,11 @@ end
 
 function private.updateCheck()
   if not IsInGuild() then return end
-  ---@diagnostic disable-next-line: param-type-mismatch
-  private.sendAddonMessage(ns.enums.addonMessagesTypes.updateCheckForDesktopAppUsers, ns.mapping.GetMsgData(ns.enums.context.updateCheck, charDB), ns.enums.chatChannels.guild, "NORMAL", nil, false)
+  -- built on send, the payload is relative to server time
+  private.sendAddonMessage(ns.enums.addonMessagesTypes.updateCheckForDesktopAppUsers, function()
+    ---@diagnostic disable-next-line: param-type-mismatch
+    return ns.mapping.GetMsgData(ns.enums.context.updateCheck, charDB)
+  end, ns.enums.chatChannels.guild, nil, false)
 end
 
 C_Timer.After(15, function()
@@ -237,7 +251,7 @@ function private.whitelistDataUpdateCheck()
       local str = ns.mapping.GetMsgData(ns.enums.context.whitelistCharSyncRequest, temp, nil, listId)
       if str ~= "" then
         ns.Debug.print("sending whitelistCharSyncRequest for list: '%s', total characters found: '%s'", listId, #temp)
-        private.sendAddonMessage(ns.enums.addonMessagesTypes.whitelistCharSyncRequest, str, ns.enums.chatChannels.guild, "NORMAL", nil, false)
+        private.sendAddonMessage(ns.enums.addonMessagesTypes.whitelistCharSyncRequest, str, ns.enums.chatChannels.guild, nil, false, { subKey = listId })
       end
     end
   end
@@ -258,7 +272,7 @@ function private.generalUpdateCheck()
   local str = ns.mapping.GetMsgData(ns.enums.context.generalUpdatedCheck)
   if str == "" then return end
   ns.Debug.print("sending generalUpdateCheck")
-  private.sendAddonMessage(ns.enums.addonMessagesTypes.generalUpdatedCheck, str, ns.enums.chatChannels.guild, "NORMAL", nil, false)
+  private.sendAddonMessage(ns.enums.addonMessagesTypes.generalUpdatedCheck, str, ns.enums.chatChannels.guild, nil, false)
 end
 
 C_Timer.After(20, function()
@@ -340,55 +354,206 @@ function private.prepString(str, sending)
   return decompressed
 end
 
----@param addonMessagesType wowutils_enums_addonMessageTypes
----@param uncompressedMsg string
----@param prefChannel "instance_chat"|"raid"|"party"|"guild"
----@param prio "BULK"|"NORMAL"|"ALERT" this is not actually in use anymore, instead its hardcoded prio per prefix (but cba to refactor atm)
----@param target string? if nil, assume source guid instead
----@param isCbor boolean
-function private.sendAddonMessage(addonMessagesType, uncompressedMsg, prefChannel, prio, target, isCbor)
-  assert(type(addonMessagesType) ~= "nil", "not nill")
-  if ns.restrictedAddonMessages then
-    for _, v in pairs(private.queue) do
-      if v.addonMessageType == addonMessagesType and v.prefChannel == prefChannel and v.uncompressedMsg == uncompressedMsg then return end
-      if addonMessagesType == ns.enums.addonMessagesTypes.updateCheckForDesktopAppUsers and v.addonMessageType == addonMessagesType and prefChannel == v.prefChannel then -- updateChecker, just replace the string with new data
-        v.uncompressedMsg = uncompressedMsg
-        return
+-- send queue: one message per tick, picked by type prio (aged by wait time) then by age.
+-- keyed so the same data can't sit in the queue twice, payloads are built when they actually go out
+local msgTypes = ns.enums.addonMessagesTypes
+local typePrio = { -- lower goes first
+  [msgTypes.fullCharacterSyncRequest] = 1,
+  [msgTypes.syncListRequest] = 1,
+  [msgTypes.forLoot] = 2,
+  [msgTypes.droptimizerData] = 2,
+  [msgTypes.partialCharacterUpdate] = 2,
+  [msgTypes.updateCheckForDesktopAppUsers] = 3,
+  [msgTypes.generalUpdatedCheck] = 3,
+  [msgTypes.whitelistCharSyncRequest] = 3,
+  [msgTypes.fullCharacterSync] = 4,
+  [msgTypes.fullSynclistInformation] = 4,
+  [msgTypes.itemCache] = 5,
+  [msgTypes.craftingOrders] = 5,
+}
+local defaultPrio = 3
+local agingStep = 30 -- seconds waited per prio level gained, keeps low prio from starving
+local tickInterval = 0.5
+local laneTimeout = 10 -- in case the ctl callback never fires for a message
+local replyJitter = 10 -- relays get a random delay so whoever goes first can supersede everyone else's copy
+---one lane per prefix, so a big BULK transfer can't hold back NORMAL messages
+---@type table<string, {current: wowutils_queueEntry?, since: number}>
+local lanes = {}
+for _, prefix in pairs(prefixes) do
+  lanes[prefix] = { since = 0 }
+end
+local ticker
+
+---@class wowutils_queueSupersede
+---@field context wowutils_enums_context
+---@field id string
+---@field getTimestamp fun():number same value GetMsgData writes into the payload header
+
+---@class wowutils_queueEntry
+---@field addonMessageType wowutils_enums_addonMessageTypes
+---@field build string|fun():string?
+---@field prefChannel string
+---@field target string?
+---@field isCbor boolean
+---@field prefix string
+---@field queuedAt number first enqueue, kept when the entry gets replaced
+---@field notBefore number
+---@field supersede wowutils_queueSupersede?
+
+---@class wowutils_queueOpts
+---@field subKey string? needed when one message type carries different payloads (contexts, list ids)
+---@field jitter boolean? for relays that several guild members might send at the same time
+---@field supersede wowutils_queueSupersede? drop the queued message when someone else sends the same or newer data
+
+---@param prefix string
+---@param now number
+---@return boolean
+function private.isLaneBusy(prefix, now)
+  local lane = lanes[prefix]
+  if lane.current and now - lane.since < laneTimeout then return true end
+  -- shared with every other addon, so other traffic counts too. internals, guard everything
+  local ctl = _G.ChatThrottleLib
+  ---@diagnostic disable-next-line: undefined-field
+  local p = ctl and ctl.Prio and ctl.Prio[msgPrioForPrexies[prefix]]
+  if not p then return false end
+  return (p.Ring and p.Ring.pos or p.Blocked and p.Blocked.pos) and true or false
+end
+
+---@param entry wowutils_queueEntry
+---@param sent number
+---@param total number
+function private.onChunkSent(entry, sent, total)
+  if sent < total then return end
+  local lane = lanes[entry.prefix]
+  if lane.current == entry then
+    lane.current = nil
+  end
+end
+
+---@param now number
+---@return string? key
+---@return wowutils_queueEntry? entry
+---@return number? prio
+function private.pickNext(now)
+  local bestKey, best, bestPrio
+  for key, entry in pairs(private.queue) do
+    if now >= entry.notBefore and not private.isLaneBusy(entry.prefix, now) then
+      local prio = (typePrio[entry.addonMessageType] or defaultPrio) - math.floor((now - entry.queuedAt) / agingStep)
+      if not best or prio < bestPrio or (prio == bestPrio and entry.queuedAt < best.queuedAt) then
+        bestKey, best, bestPrio = key, entry, prio
       end
     end
-    tinsert(private.queue, {
-      addonMessageType = addonMessagesType,
-      uncompressedMsg = uncompressedMsg,
-      prefChannel = prefChannel,
-      prio = prio,
-      target = target,
-      isCbor = isCbor
-    })
+  end
+  return bestKey, best, bestPrio
+end
+
+---@param entry wowutils_queueEntry
+---@param payload string
+---@param channel string
+function private.sendNow(entry, payload, channel)
+  local lane = lanes[entry.prefix]
+  lane.current = entry
+  lane.since = GetTime()
+  if entry.prefix ~= prefixes.updateChecker then
+    payload = private.prepString(payload, true)
+  end
+  aceComms:SendCommMessage(entry.prefix, private.addVersionsToCompressedString(entry.addonMessageType, payload, entry.target, entry.isCbor), channel, nil, msgPrioForPrexies[entry.prefix], private.onChunkSent, entry)
+end
+
+function private.tick()
+  if ns.restrictedAddonMessages or not next(private.queue) then
+    if ticker then
+      ticker:Cancel()
+      ticker = nil
+    end
     return
   end
+  local now = GetTime()
+  while true do
+    local key, entry, prio = private.pickNext(now)
+    if not (key and entry) then return end -- everything is waiting on jitter or a busy lane
+    private.queue[key] = nil
+    local channel = private.confimChannel(entry.prefChannel)
+    local payload = channel and entry.build
+    if type(payload) == "function" then
+      payload = payload()
+    end
+    if payload and payload ~= "" then
+      ns.Debug.print("sending '%s' - prio '%s', waited '%.1f's, lane '%s', left in queue '%s'", key, prio, now - entry.queuedAt, entry.prefix, CountTable(private.queue))
+      private.sendNow(entry, payload, channel)
+      return
+    end
+  end
+end
+
+function private.ensureTicker()
+  if ticker or ns.restrictedAddonMessages or not next(private.queue) then return end
+  ticker = C_Timer.NewTicker(tickInterval, private.tick)
+  private.tick() -- don't make a lone message wait for the first tick
+end
+
+---@param addonMessagesType wowutils_enums_addonMessageTypes
+---@param msgOrBuilder string|fun():string? builders run when the message goes out, so the data is as fresh as it gets. nil/"" drops it
+---@param prefChannel "instance_chat"|"raid"|"party"|"guild"
+---@param target string? if nil, assume source guid instead
+---@param isCbor boolean
+---@param opts wowutils_queueOpts?
+function private.sendAddonMessage(addonMessagesType, msgOrBuilder, prefChannel, target, isCbor, opts)
+  assert(type(addonMessagesType) ~= "nil", "not nill")
   local prefix = private.getCorrectPrefixForType(addonMessagesType)
   if not prefix then return end
-  if prefix == prefixes.updateChecker then
-    aceComms:SendCommMessage(prefix, private.addVersionsToCompressedString(addonMessagesType, uncompressedMsg, target, isCbor), prefChannel, nil, msgPrioForPrexies[prefix])
-    return
+  local key = addonMessagesType .. (target or "") .. (opts and opts.subKey or "")
+  local entry = private.queue[key]
+  if entry then
+    -- keep queuedAt and notBefore, constant updates shouldn't push it back or reroll the jitter
+    entry.build = msgOrBuilder
+    entry.prefChannel = prefChannel
+    entry.supersede = opts and opts.supersede
+  else
+    local now = GetTime()
+    private.queue[key] = {
+      addonMessageType = addonMessagesType,
+      build = msgOrBuilder,
+      prefChannel = prefChannel,
+      target = target,
+      isCbor = isCbor,
+      prefix = prefix,
+      queuedAt = now,
+      notBefore = now + (opts and opts.jitter and math.random() * replyJitter or 0),
+      supersede = opts and opts.supersede,
+    }
   end
-  aceComms:SendCommMessage(prefix, private.addVersionsToCompressedString(addonMessagesType, private.prepString(uncompressedMsg, true), target, isCbor), prefChannel, nil, msgPrioForPrexies[prefix])
+  private.ensureTicker()
+end
+
+---@param context wowutils_enums_context
+---@param id string
+---@return boolean
+function private.hasSupersedeFor(context, id)
+  for _, entry in pairs(private.queue) do
+    if entry.supersede and entry.supersede.context == context and entry.supersede.id == id then
+      return true
+    end
+  end
+  return false
+end
+
+---someone else sent this data, so our queued copy is pointless if theirs is at least as new
+---@param context wowutils_enums_context
+---@param id string
+---@param incomingTimestamp number
+function ns.communication.DropSupersededFromQueue(context, id, incomingTimestamp)
+  for key, entry in pairs(private.queue) do
+    local supersede = entry.supersede
+    if supersede and supersede.context == context and supersede.id == id and incomingTimestamp >= supersede.getTimestamp() then
+      ns.Debug.print("dropping queued '%s', someone else sent same or newer data", key)
+      private.queue[key] = nil
+    end
+  end
 end
 
 function ns.communication.AddonMessageRestrictionsLifted()
-  -- TODO actually check if all of the messages go through
-  for _, data in pairs(private.queue) do
-    local prefix = private.getCorrectPrefixForType(data.addonMessageType)
-    local channel = private.confimChannel(data.prefChannel)
-    if prefix and channel then
-      if prefix == prefixes.updateChecker then
-        aceComms:SendCommMessage(prefix, private.addVersionsToCompressedString(data.addonMessageType, data.uncompressedMsg, data.target, data.isCbor), channel, nil, msgPrioForPrexies[prefix])
-      else
-        aceComms:SendCommMessage(prefix, private.addVersionsToCompressedString(data.addonMessageType, private.prepString(data.uncompressedMsg, true), data.target, data.isCbor), channel, nil, msgPrioForPrexies[prefix])
-      end
-    end
-  end
-  wipe(private.queue)
+  private.ensureTicker()
 end
 
 do
@@ -400,12 +565,13 @@ do
     --local currentGroupType = IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and "instance_chat" or IsInRaid() and "raid" or "party"
     --if currentGroupType == "party" then return end -- ignore party at least for now
 
-    local t = {}
-    tinsert(t, ns.mapping.GetMsgData(ns.enums.context.currency, charDB.currency, charDB.currencyUpdated))
-    tinsert(t, ns.mapping.GetMsgData(ns.enums.context.craftingItems, charDB.craftingItems, charDB.craftingItemsUpdated))
-    tinsert(t, ns.mapping.GetMsgData(ns.enums.context.watermarks, charDB.watermarks, charDB.watermarksUpdated))
-    local str = tconcat(t, "@")
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.forLoot, str, ns.enums.chatChannels.guild, "NORMAL", nil, false)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.forLoot, function()
+      local t = {}
+      tinsert(t, ns.mapping.GetMsgData(ns.enums.context.currency, charDB.currency, charDB.currencyUpdated))
+      tinsert(t, ns.mapping.GetMsgData(ns.enums.context.craftingItems, charDB.craftingItems, charDB.craftingItemsUpdated))
+      tinsert(t, ns.mapping.GetMsgData(ns.enums.context.watermarks, charDB.watermarks, charDB.watermarksUpdated))
+      return tconcat(t, "@")
+    end, ns.enums.chatChannels.guild, nil, false)
     -- don't combine messages
     ns.communication.SendDroptimizerData()
     lastSentTime = GetTime()
@@ -420,7 +586,22 @@ do
     if GetTime() - lastSentTime < 5 then return end
     if not IsInGuild() then return end
     ns.Debug.print("sending full synclist information")
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.fullSynclistInformation, ns.mapping.GetMsgData(ns.enums.context.fullSynclistInformation, WowUtilsDB.syncLists[listId], nil, listId), ns.enums.chatChannels.guild, "NORMAL", nil, true)
+    -- answers someone's request, anyone else with the list answers too
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.fullSynclistInformation, function()
+      local list = WowUtilsDB.syncLists[listId]
+      return list and ns.mapping.GetMsgData(ns.enums.context.fullSynclistInformation, list, nil, listId)
+    end, ns.enums.chatChannels.guild, nil, true, {
+      subKey = listId,
+      jitter = true,
+      supersede = {
+        context = ns.enums.context.fullSynclistInformation,
+        id = listId,
+        getTimestamp = function()
+          local list = WowUtilsDB.syncLists[listId]
+          return list and list.lastUpdate or 0
+        end,
+      },
+    })
     lastSentTime = GetTime()
   end
 end
@@ -435,7 +616,7 @@ do
     ns.Debug.print("requesting synclist information '%s'", listId)
     local str = ns.mapping.GetMsgData(ns.enums.context.syncListRequest, listId, currentTimestamp)
     if str == "" then return end
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.syncListRequest, str, ns.enums.chatChannels.guild, "NORMAL", nil, true)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.syncListRequest, str, ns.enums.chatChannels.guild, nil, true, { subKey = listId })
     cache[listId] = GetTime()
   end
 end
@@ -444,11 +625,13 @@ do
   function ns.communication.SendCurrencyUpdate()
     if GetTime() - lastSentTime < .5 then return end
     ns.Debug.print("sending currency update")
-    local dataStr = ns.mapping.GetMsgData(ns.enums.context.currency, charDB.currency, charDB.currencyUpdated)
-    if not dataStr then
-      geterrorhandler()("dataStr is nil")
-    end
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, dataStr, ns.enums.chatChannels.guild, "NORMAL", nil, false)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, function()
+      local dataStr = ns.mapping.GetMsgData(ns.enums.context.currency, charDB.currency, charDB.currencyUpdated)
+      if not dataStr then
+        geterrorhandler()("dataStr is nil")
+      end
+      return dataStr
+    end, ns.enums.chatChannels.guild, nil, false, { subKey = ns.enums.context.currency })
     lastSentTime = GetTime()
   end
 end
@@ -457,7 +640,9 @@ do
   function ns.communication.SendWatermarkUpdate()
     if GetTime() - lastSentTime < 1 then return end
     ns.Debug.print("sending watermarks")
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.watermarks, charDB.watermarks, charDB.watermarksUpdated), ns.enums.chatChannels.guild, "NORMAL", nil, false)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, function()
+      return ns.mapping.GetMsgData(ns.enums.context.watermarks, charDB.watermarks, charDB.watermarksUpdated)
+    end, ns.enums.chatChannels.guild, nil, false, { subKey = ns.enums.context.watermarks })
     lastSentTime = GetTime()
   end
 end
@@ -466,7 +651,9 @@ do
   function ns.communication.SendBonusCoinUsageUpdate()
     if GetTime() - lastSentTime < 1 then return end
     ns.Debug.print("sending bonus coin usages")
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.bonusCoin, charDB.bonusCoinUsage, charDB.bonusCoinUsageUpdated), ns.enums.chatChannels.guild, "NORMAL", nil, true)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, function()
+      return ns.mapping.GetMsgData(ns.enums.context.bonusCoin, charDB.bonusCoinUsage, charDB.bonusCoinUsageUpdated)
+    end, ns.enums.chatChannels.guild, nil, true, { subKey = ns.enums.context.bonusCoin })
     lastSentTime = GetTime()
   end
 end
@@ -475,7 +662,9 @@ do
   function ns.communication.SendCraftingItemUpdate()
     if GetTime() - lastSentTime < 1 then return end
     ns.Debug.print("sending craft item update")
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.craftingItems, charDB.craftingItems, charDB.craftingItemsUpdated), ns.enums.chatChannels.guild, "NORMAL", nil, false)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, function()
+      return ns.mapping.GetMsgData(ns.enums.context.craftingItems, charDB.craftingItems, charDB.craftingItemsUpdated)
+    end, ns.enums.chatChannels.guild, nil, false, { subKey = ns.enums.context.craftingItems })
     lastSentTime = GetTime()
   end
 end
@@ -485,7 +674,9 @@ do
     if GetTime() - lastSentTime < 1 then return end
     if not charDB.lockouts then return end
     ns.Debug.print("sending lockout update")
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.lockouts, charDB.lockouts, charDB.lockoutsUpdated), ns.enums.chatChannels.guild, "NORMAL", nil, false)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, function()
+      return ns.mapping.GetMsgData(ns.enums.context.lockouts, charDB.lockouts, charDB.lockoutsUpdated)
+    end, ns.enums.chatChannels.guild, nil, false, { subKey = ns.enums.context.lockouts })
     lastSentTime = GetTime()
   end
 end
@@ -495,7 +686,9 @@ do
     if GetTime() - lastSentTime < 1 then return end
     if not charDB.dungeonsDone then return end
     ns.Debug.print("sending dungeonsDone update")
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.dungeonsDone, charDB.dungeonsDone, charDB.dungeonsUpdated), ns.enums.chatChannels.guild, "NORMAL", nil, false)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, function()
+      return ns.mapping.GetMsgData(ns.enums.context.dungeonsDone, charDB.dungeonsDone, charDB.dungeonsUpdated)
+    end, ns.enums.chatChannels.guild, nil, false, { subKey = ns.enums.context.dungeonsDone })
     lastSentTime = GetTime()
   end
 end
@@ -505,7 +698,9 @@ do
   function ns.communication.SendFullSyncFromCurrentCharacter(targetChannel)
     if GetTime() - lastSentTime < 5 then return end
     ns.Debug.print("sending current full char")
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.fullCharacterSync, ns.mapping.GetMsgData(ns.enums.context.fullCharacterSync, charDB), targetChannel, "NORMAL", nil, true)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.fullCharacterSync, function()
+      return ns.mapping.GetMsgData(ns.enums.context.fullCharacterSync, charDB)
+    end, targetChannel, nil, true)
     lastSentTime = GetTime()
   end
 end
@@ -515,7 +710,17 @@ do
   function ns.communication.SendFullSyncFromSpecificCharacter(data)
     if GetTime() - (cache[data.guid] or 0) < 5 then return end
     ns.Debug.print("sending full char '%s'", data.droptimizerKey)
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.fullCharacterSync, ns.mapping.GetMsgData(ns.enums.context.fullCharacterSyncFromDB, data), ns.enums.chatChannels.guild, "NORMAL", "A"..ns.mapping.ConvertGuidToMsgFormat(data.guid), true)
+    -- relay out of the db, anyone else holding this character answers the same request
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.fullCharacterSync, function()
+      return ns.mapping.GetMsgData(ns.enums.context.fullCharacterSyncFromDB, data)
+    end, ns.enums.chatChannels.guild, "A"..ns.mapping.ConvertGuidToMsgFormat(data.guid), true, {
+      jitter = data.guid ~= ns.me.guid,
+      supersede = {
+        context = ns.enums.context.fullCharacterSyncFromDB,
+        id = data.guid,
+        getTimestamp = function() return ns.mapping.GetCharacterTimestampsForWideSync(data) end,
+      },
+    })
     cache[data.guid] = GetTime()
   end
 end
@@ -538,8 +743,17 @@ do
       return
     end
     ns.Debug.print("sending items for char '%s'", data.droptimizerKey)
-    if not data.itemCache then return end
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.itemCache, ns.mapping.GetMsgData(ns.enums.context.itemCache, data), ns.enums.chatChannels.guild, "NORMAL", "A"..ns.mapping.ConvertGuidToMsgFormat(data.guid), true)
+    if not data.itemCache2 then return end
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.itemCache, function()
+      return data.itemCache2 and ns.mapping.GetMsgData(ns.enums.context.itemCache, data)
+    end, ns.enums.chatChannels.guild, "A"..ns.mapping.ConvertGuidToMsgFormat(data.guid), true, {
+      jitter = data.guid ~= ns.me.guid, -- own items come from us, anything else is a relay
+      supersede = {
+        context = ns.enums.context.itemCache,
+        id = data.guid,
+        getTimestamp = function() return data.itemCacheUpdated or 0 end,
+      },
+    })
     cache[data.guid] = GetTime()
   end
 end
@@ -550,7 +764,7 @@ do
   function ns.communication.RequestFullSync(partialGuid, targetChannel)
     if GetTime() - (cache[partialGuid] or 0) < 5 then return end
     ns.Debug.print("requesting full sync for '%s'", partialGuid)
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.fullCharacterSyncRequest, "F", targetChannel, "NORMAL", "T" .. partialGuid, false)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.fullCharacterSyncRequest, "F", targetChannel, "T" .. partialGuid, false)
     cache[partialGuid] = GetTime()
   end
 end
@@ -558,7 +772,9 @@ do
   local lastSentTime = 0
   function ns.communication.SendVaultDataUpdate()
     if GetTime() - lastSentTime < 1 then return end
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.vaultData, charDB.vaultData, charDB.vaultDataLastUpdate or 0), ns.enums.chatChannels.guild, "NORMAL", nil, true)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, function()
+      return ns.mapping.GetMsgData(ns.enums.context.vaultData, charDB.vaultData, charDB.vaultDataLastUpdate or 0)
+    end, ns.enums.chatChannels.guild, nil, true, { subKey = ns.enums.context.vaultData })
     lastSentTime = GetTime()
   end
 end
@@ -566,7 +782,9 @@ do
   local lastSentTime = 0
   function ns.communication.SendWeeklyRewardsUpdate()
     if GetTime() - lastSentTime < 1 then return end
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.weeklyRewards, charDB.weeklyRewards, charDB.weeklyRewardsUpdate or 0), ns.enums.chatChannels.guild, "NORMAL", nil, true)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, function()
+      return ns.mapping.GetMsgData(ns.enums.context.weeklyRewards, charDB.weeklyRewards, charDB.weeklyRewardsUpdate or 0)
+    end, ns.enums.chatChannels.guild, nil, true, { subKey = ns.enums.context.weeklyRewards })
     lastSentTime = GetTime()
   end
 end
@@ -574,7 +792,9 @@ do
   local lastSentTime = 0
   function ns.communication.SendQuestUpdate()
     if GetTime() - lastSentTime < 1 then return end
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, ns.mapping.GetMsgData(ns.enums.context.quests, charDB.quests, charDB.questsUpdated or 0), ns.enums.chatChannels.guild, "NORMAL", nil, false)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.partialCharacterUpdate, function()
+      return ns.mapping.GetMsgData(ns.enums.context.quests, charDB.quests, charDB.questsUpdated or 0)
+    end, ns.enums.chatChannels.guild, nil, false, { subKey = ns.enums.context.quests })
     lastSentTime = GetTime()
   end
 end
@@ -594,14 +814,31 @@ do
       t = WowUtilsDB.droptimizerData[key]
     end
     if not t then return end
-    local dataStr = ns.mapping.GetMsgData(ns.enums.context.droptimizerData, t)
-    if not dataStr then return end
-    local target = sformat("%s%s", key == "own" and "S" or "T", key == "own" and ns.me.droptimizerKey or key)
+    local dataKey = key == "own" and ns.me.droptimizerKey or key
+    local target = sformat("%s%s", key == "own" and "S" or "T", dataKey)
     --local channel = ns.enums.chatChannels.guild
     --if key == "own" then
       --channel = IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and "instance_chat" or IsInRaid() and "raid" or "party"
     --end
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.droptimizerData, dataStr, ns.enums.chatChannels.guild, "NORMAL", target, true)
+    ---@type wowutils_queueOpts?
+    local opts
+    if key ~= "own" then -- answering someone's update check, others with the same data answer too
+      opts = {
+        jitter = true,
+        supersede = {
+          context = ns.enums.context.droptimizerData,
+          id = key,
+          getTimestamp = function()
+            local data = WowUtilsDB.droptimizerData[key]
+            return data and data.lastUpdate or 0
+          end,
+        },
+      }
+    end
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.droptimizerData, function()
+      local data = WowUtilsDB.droptimizerData[dataKey]
+      return data and ns.mapping.GetMsgData(ns.enums.context.droptimizerData, data)
+    end, ns.enums.chatChannels.guild, target, true, opts)
     cache[key] = GetTime()
   end
 end
@@ -626,7 +863,12 @@ do
     if not (guildCache and next(guildCache)) then return end
     ns.randomThings.craftingOrders.PruneExpired(guildCache)
     ns.Debug.print("sending crafting orders")
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.craftingOrders, ns.mapping.GetMsgData(ns.enums.context.craftingOrders, guildCache, nil, ns.me.guildInfo.dbSlug), ns.enums.chatChannels.guild, "BULK", nil, true)
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.craftingOrders, function()
+      local cache = ns.randomThings.craftingOrders.GetGuildCache()
+      if not (cache and next(cache)) then return end
+      ns.randomThings.craftingOrders.PruneExpired(cache)
+      return ns.mapping.GetMsgData(ns.enums.context.craftingOrders, cache, nil, ns.me.guildInfo.dbSlug)
+    end, ns.enums.chatChannels.guild, nil, true)
     lastSentTime = GetTime()
   end
 end
