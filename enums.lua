@@ -1,9 +1,14 @@
 
 ---@class wowutilsPrivate
 ---@field enums wowutils_enums
+---@field IsRetail boolean
+---@field IsForever boolean
 
 ---@type string, wowutilsPrivate
 local addon_name, ns = ...
+
+ns.IsRetail = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
+ns.IsForever = WOW_PROJECT_ID == WOW_PROJECT_CAMELOT
 
 ---@class wowutils_enums
 ns.enums = {

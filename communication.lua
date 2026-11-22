@@ -126,7 +126,7 @@ ns.communication.msgHandlers[prefixes.normal] = function(prefix, msg, channel, s
 end
 ns.communication.msgHandlers[prefixes.lowPrio] = ns.communication.msgHandlers[prefixes.normal] -- just use same handler, functionality is the same (at least for now)
 if ns.hasDataAddon then
-  local mapToTimestampVars = {
+  local mapToTimestampVars = ns.IsRetail and {
     [2] = "currencyUpdated",
     [3] = "questsUpdated",
     [4] = "watermarksUpdated",
@@ -136,10 +136,18 @@ if ns.hasDataAddon then
     -- 8 is used for lastUpdate, dont wanna change that
     -- 9 is used for droptimizerKey
     [10] = "dungeonsUpdated",
+  } or
+  { -- forever
+    [2] = "currencyUpdated",
+    [3] = "questsUpdated",
+    -- 4 is used for lastUpdate
+    -- 5 is used for droptimizerKey
   }
-  local minConfigVersionsToCare = {
+  local minConfigVersionsToCare = ns.IsRetail and {
     [10] = 6,
-  }
+  } or {} -- forever
+  local droptimizerKeyIndex = ns.IsRetail and 9 or 5
+  local lastUpdatedIndex = ns.IsRetail and 8 or 4
   ns.communication.msgHandlers[prefixes.updateChecker] = function(prefix, msg, channel, sender)
     if channel ~= "GUILD" then return end -- only accept messages from guild chat for now
     if UnitIsUnit("player", sender) then return end
@@ -162,9 +170,9 @@ if ns.hasDataAddon then
     -- would just drop the droptimizer data. the RequestFullSync calls further down stay unconditional
     -- though, those still pay off: the request rides in the uncompressed header so an older client
     -- reads it fine and answers in deflate, which prepString falls back to.
-    if data[9] and WowUtilsDB.droptimizerData[data[9]] and configVersion >= ns.config.configVersion then -- droptimizerKey
-      if WowUtilsDB.droptimizerData[data[9]].lastUpdate > fixedPoint - (tonumber(data[8]) or 0) then
-        ns.communication.SendDroptimizerData(data[9])
+    if data[droptimizerKeyIndex] and WowUtilsDB.droptimizerData[data[droptimizerKeyIndex]] and configVersion >= ns.config.configVersion then -- droptimizerKey
+      if WowUtilsDB.droptimizerData[data[droptimizerKeyIndex]].lastUpdate > fixedPoint - (tonumber(data[lastUpdatedIndex]) or 0) then
+        ns.communication.SendDroptimizerData(data[droptimizerKeyIndex])
       end
     end
     local targetGuid = ns.mapping.ConvertPartialGuidToGuid(partialGuid)
@@ -264,10 +272,12 @@ end)
 
 function private.generalUpdateCheck()
   if ns.restrictedAddonMessages then return end -- unlike private.updateCheck, this actually takes resources to run, so skip checks during restrictions
-  -- runs every couple of minutes anyway, keeps the cache from holding on to expired orders between syncs
-  local guildCache = ns.randomThings.craftingOrders.GetGuildCache()
-  if guildCache then
-    ns.randomThings.craftingOrders.PruneExpired(guildCache)
+  if ns.IsRetail then
+    -- runs every couple of minutes anyway, keeps the cache from holding on to expired orders between syncs
+    local guildCache = ns.randomThings.craftingOrders.GetGuildCache()
+    if guildCache then
+      ns.randomThings.craftingOrders.PruneExpired(guildCache)
+    end
   end
   local str = ns.mapping.GetMsgData(ns.enums.context.generalUpdatedCheck)
   if str == "" then return end
@@ -286,9 +296,11 @@ function private.getCorrectPrefixForType(addonMessagesType)
   if addonMessagesType == ns.enums.addonMessagesTypes.updateCheckForDesktopAppUsers then
     return prefixes.updateChecker
   end
-  if addonMessagesType == ns.enums.addonMessagesTypes.itemCache or addonMessagesType == ns.enums.addonMessagesTypes.craftingOrders then
-    return prefixes.lowPrio
-  end
+  -- TEMP: Chomp raises ChatThrottleLib's burst/rate values, so a second lane running in parallel makes CTL
+  -- send more than the client allows (chat msg errors). Everything goes over the normal prefix until that's sorted.
+  -- if addonMessagesType == ns.enums.addonMessagesTypes.itemCache or addonMessagesType == ns.enums.addonMessagesTypes.craftingOrders then
+  --   return prefixes.lowPrio
+  -- end
   return prefixes.normal
 end
 
@@ -565,11 +577,15 @@ do
     --local currentGroupType = IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and "instance_chat" or IsInRaid() and "raid" or "party"
     --if currentGroupType == "party" then return end -- ignore party at least for now
 
-    private.sendAddonMessage(ns.enums.addonMessagesTypes.forLoot, function()
+    private.sendAddonMessage(ns.enums.addonMessagesTypes.forLoot, ns.IsRetail and function()
       local t = {}
       tinsert(t, ns.mapping.GetMsgData(ns.enums.context.currency, charDB.currency, charDB.currencyUpdated))
       tinsert(t, ns.mapping.GetMsgData(ns.enums.context.craftingItems, charDB.craftingItems, charDB.craftingItemsUpdated))
       tinsert(t, ns.mapping.GetMsgData(ns.enums.context.watermarks, charDB.watermarks, charDB.watermarksUpdated))
+      return tconcat(t, "@")
+    end or function() -- forever
+      local t = {}
+      tinsert(t, ns.mapping.GetMsgData(ns.enums.context.currency, charDB.currency, charDB.currencyUpdated))
       return tconcat(t, "@")
     end, ns.enums.chatChannels.guild, nil, false)
     -- don't combine messages

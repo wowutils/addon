@@ -9,7 +9,7 @@ local _cache = {}
 
 ---@param guid string
 ---@param channel string
----@return wowutils_otherChar?
+---@return wowutils_otherChar|wowutils_otherChar_forever?
 local function confirmAndReturnDBForChar(guid, channel)
   if not WowUtilsDB.others[guid] then
     ns.communication.RequestFullSync(ns.mapping.ConvertGuidToMsgFormat(guid), channel)
@@ -142,7 +142,7 @@ local function updateRefreshTimeIfNeededForFullSync(currentData, incomingData, d
   if incomingData.dataRefreshTimes[dataType] <= currentData.dataRefreshTimes[dataType] then return end
   currentData.dataRefreshTimes[dataType] = incomingData.dataRefreshTimes[dataType]
 end
-local fullSyncChecks = {
+local fullSyncChecks = ns.IsRetail and {
   currency = {updateKey = "currencyUpdated", refreshKey = "currency"},
   watermarks = {updateKey = "watermarksUpdated", refreshKey = "watermarks"},
   craftingItems = {updateKey = "craftingItemsUpdated", refreshKey = "craftingItems"},
@@ -152,6 +152,10 @@ local fullSyncChecks = {
   bonusCoinUsage = {updateKey = "bonusCoinUsageUpdated", refreshKey = "bonusCoinUsage"},
   lockouts = {updateKey = "lockoutsUpdated", refreshKey = "lockouts"},
   dungeonsDone = {updateKey = "dungeonsUpdated", refreshKey = "dungeonsDone"},
+} or { -- forever
+  currency = {updateKey = "currencyUpdated", refreshKey = "currency"},
+  quests = {updateKey = "questsUpdated", refreshKey = "quests"},
+  lockouts = {updateKey = "lockoutsUpdated", refreshKey = "lockouts"},
 }
 ---@class wowutils_mapping
 ---@field toRealData table<string, wowutils_mapping_toRealDataFunc>
@@ -162,6 +166,7 @@ local fullSyncChecks = {
 ns.mapping = {
   toRealData = {
     [currentUsage.watermarks] = function(configVersion, dbVersion, str, db, targetGuid, channel) -- A
+      if ns.IsForever then return end
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       if not db then
         db = confirmAndReturnDBForChar(targetGuid, channel)
@@ -176,7 +181,6 @@ ns.mapping = {
           if db.watermarksUpdated == timestamp then
             ns.database.DataRefreshed(ns.enums.context.watermarks, db)
           end
-          ns.Debug.print("already has newer data")
           return
         end                                                                                           -- Current data is newer, discard
       end
@@ -243,6 +247,7 @@ ns.mapping = {
       db.lastUpdateReceived = GetServerTime()
     end,
     [currentUsage.craftingItems] = function(configVersion, dbVersion, str, db, targetGuid, channel) -- C
+      if ns.IsForever then return end
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       if not db then
         db = confirmAndReturnDBForChar(targetGuid, channel)
@@ -313,6 +318,7 @@ ns.mapping = {
       WowUtilsDB.others[targetGuid].lastUpdateReceived = GetServerTime()
     end,
     [currentUsage.vaultData] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- G
+      if ns.IsForever then return end
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       local targetGuid = ns.mapping.ConvertPartialGuidToGuid(partialGuid)
       if not db then
@@ -337,6 +343,7 @@ ns.mapping = {
       db.lastUpdateReceived = GetServerTime()
     end,
     [currentUsage.weeklyRewards] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- H
+      if ns.IsForever then return end
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       local targetGuid = ns.mapping.ConvertPartialGuidToGuid(partialGuid)
       if not db then
@@ -370,7 +377,9 @@ ns.mapping = {
       if not timestamp then return end
       timestamp = ns.mapping.timestamp.FromValue(timestamp)
       if db.questsUpdated >= timestamp then -- we already have newer data, discard
-        ns.database.DataRefreshed(ns.enums.context.quests, db)
+        if db.questsUpdated == timestamp then
+          ns.database.DataRefreshed(ns.enums.context.quests, db)
+        end
         return
       end
       ns.Debug.print("receiving quest update for '%s'", targetGuid)
@@ -394,7 +403,7 @@ ns.mapping = {
       -- this one answers with data, so don't bother for a requester on an older config: every handler
       -- drops messages from a newer config, so they would just throw away whatever we sent back.
       -- 6 also added lockoutsUpdated to the timestamp sums, so older sums can't be compared anyway
-      if configVersion < 6 then return end
+      if ns.IsRetail and configVersion < 6 then return end
       --[[
        for _,v in pairs(data) do
         tinsert(temp, sformat("%s?%s", v.id, v.timestamp))
@@ -406,7 +415,7 @@ ns.mapping = {
       local targetList = WowUtilsDB.syncLists[listId] and WowUtilsDB.syncLists[listId].characters
       if not targetList then return end
       local cache -- TODO cache these on data update instead of here, good enough for now (beta)
-      if configVersion < 6 then -- 6 added a seperate timestamp for items
+      if ns.IsRetail and configVersion < 6 then -- 6 added a seperate timestamp for items
         for _, v in pairs({ strsplit("^", dataStr) }) do
           local id, timestamp = strsplit("?", v)
           ---@diagnostic disable-next-line: cast-local-type
@@ -485,7 +494,7 @@ ns.mapping = {
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       -- 6 added lockoutsUpdated and dungeonsUpdated to the timestamp sums, older sums can't be compared with ours.
       -- same cutoff as J, which doesn't answer anything older either
-      if configVersion < 6 then return end
+      if ns.IsRetail and configVersion < 6 then return end
       local targetGuid = ns.mapping.ConvertPartialGuidToGuid(partialGuid)
       ns.Debug.print("receiving full character sync From DB '%s' - sender '%s'", targetGuid, sender)
       local timestamp, cborStr = readCborPayload(str)
@@ -564,7 +573,7 @@ ns.mapping = {
             end
           end
         elseif dataType == "C" then -- crafting orders, professionId:lastUpdate pairs for their current guild
-          if not tooNew then
+          if not tooNew and not ns.IsForever then
             local professionTimestamps = {}
             for _, pair in pairs({ strsplit(",", dataStr:sub(2)) }) do
               local professionIdStr, timestampStr = strsplit(":", pair)
@@ -594,7 +603,7 @@ ns.mapping = {
     [currentUsage.syncListRequest] = function(configVersion, dbVersion, str, db, targetGuid, channel) -- N
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       -- answers with data too, same reasoning as J: an older config can't read our reply
-      if configVersion < 6 then return end
+      if ns.IsRetail and configVersion < 6 then return end
       local listId, timestamp = strsplit("?", str)
       ---@diagnostic disable-next-line: cast-local-type
       timestamp = tonumber(timestamp)
@@ -603,6 +612,7 @@ ns.mapping = {
       ns.communication.SendSyncList(listId)
     end,
     [currentUsage.bonusCoinUsage] = function(configVersion, dbVersion, str, db, partialGuid, channel) -- O
+      if ns.IsForever then return end
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       local targetGuid = ns.mapping.ConvertPartialGuidToGuid(partialGuid)
       if not db then
@@ -661,6 +671,7 @@ ns.mapping = {
       -- missing .lastUpdateReveived for a reason, itemCache is not important enough to set that, we get what we get and thats it
     end,
     [currentUsage.craftingOrders] = function(configVersion, dbVersion, str, db, partialGuid, channel, sender) -- Q
+      if ns.IsForever then return end
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       local timestamp, cborStr = readCborPayload(str)
       if not timestamp then return end
@@ -679,6 +690,7 @@ ns.mapping = {
       end
     end,
     [currentUsage.lockouts] = function(configVersion, dbVersion, str, db, targetGuid, channel) -- R
+      if ns.config.lockoutsDisabled then return end
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       if not db then
         db = confirmAndReturnDBForChar(targetGuid, channel)
@@ -700,6 +712,7 @@ ns.mapping = {
       db.lastUpdateReceived = GetServerTime()
     end,
     [currentUsage.dungeonsDone] = function (configVersion, dbVersion, str, db, targetGuid, channel, sender) -- S
+      if ns.IsForever then return end
       if configVersion > ns.config.configVersion or dbVersion > ns.config.currentDBVersion then return end
       if not db then
         db = confirmAndReturnDBForChar(targetGuid, channel)
@@ -1057,10 +1070,12 @@ do
   }
 end
 do
-  local timestamps = {
+  local timestamps = ns.IsRetail and {
     "currencyUpdated", "watermarksUpdated", "craftingItemsUpdated", "questsUpdated", "vaultDataLastUpdate", "weeklyRewardsUpdate",
     "lockoutsUpdated", -- config 6, J doesn't answer anything older so sums from before this never get compared
     "dungeonsUpdated", -- config 6
+  } or { -- forever
+    "currencyUpdated", "questsUpdated", "lockoutsUpdated"
   }
   local sumOffset = #timestamps * ns.config.timestampOffset
   ---@param char wowutils_otherChar
@@ -1151,22 +1166,22 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
   if context == ns.enums.context.fullCharacterSync then
     -- TODO optimize tranmission data
     -- make a copy of the data so we can modify it before sending
-    ---@cast data wowutils_ownChar
+    ---@cast data wowutils_ownChar|wowutils_ownChar_forever
     local t = cleanUpCharacterDBBeforeSending(data)
     ns.Debug.print("trying to send fullsync: last update '%s'", t.lastUpdate or "nil")
     local lastUpdate = tostring(t.lastUpdate or 0)
     return sformat("%s%s%s%s", currentUsage.fullCharacterSync, string.char(#lastUpdate), lastUpdate, SerializeCBOR(t))
   end
   if context == ns.enums.context.fullCharacterSyncFromDB then
-    ---@cast data wowutils_ownChar|wowutils_otherChar
+    ---@cast data wowutils_ownChar|wowutils_otherChar|wowutils_ownChar_forever|wowutils_otherChar_forever
     local t = cleanUpCharacterDBBeforeSending(data)
     local summedTimestamps = tostring(ns.mapping.GetCharacterTimestampsForWideSync(t))
     return sformat("%s%s%s%s", currentUsage.fullCharacterSyncFromDB, string.char(#summedTimestamps), summedTimestamps, SerializeCBOR(t))
   end
   if context == ns.enums.context.updateCheck then
-    ---@cast data wowutils_ownChar
+    ---@cast data wowutils_ownChar|wowutils_ownChar_forever
     local serverTime = GetServerTime()
-    local t = {
+    local t = ns.IsRetail and {
       ns.mapping.timestamp.ToValue(serverTime),                                                                                                       -- 1
       math.abs(serverTime - (data.currencyUpdated or 0)),                                                                                             -- 2
       math.abs(serverTime - (data.questsUpdated or 0)),                                                                                               -- 3
@@ -1177,6 +1192,12 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
       math.abs(serverTime - (WowUtilsDB.droptimizerData[ns.me.droptimizerKey] and WowUtilsDB.droptimizerData[ns.me.droptimizerKey].lastUpdate or 0)), -- 8
       ns.me.droptimizerKey,                                                                                                                           -- 9
       math.abs(serverTime - (data.dungeonsUpdated or 0)),                                                                                             -- 10
+    } or {
+      ns.mapping.timestamp.ToValue(serverTime),                                                                                                       -- 1
+      math.abs(serverTime - (data.currencyUpdated or 0)),                                                                                             -- 2
+      math.abs(serverTime - (data.questsUpdated or 0)),                                                                                               -- 3
+      math.abs(serverTime - (WowUtilsDB.droptimizerData[ns.me.droptimizerKey] and WowUtilsDB.droptimizerData[ns.me.droptimizerKey].lastUpdate or 0)), -- 4
+      ns.me.droptimizerKey,                                                                                                                           -- 5
     }
     return tconcat(t, "^")
   end
@@ -1216,13 +1237,15 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
     for listId, listData in pairs(WowUtilsDB.syncLists) do
       tinsert(temp, sformat("A%s?%s", listId, ns.mapping.timestamp.ToValue(listData.lastUpdate or 0)))
     end
-    local guildCache = ns.randomThings.craftingOrders.GetGuildCache(true)
-    if guildCache then -- sent even when empty, so others know we can read crafting orders and send us theirs
-      local professionPairs = {}
-      for professionId, professionData in pairs(guildCache) do
-        tinsert(professionPairs, sformat("%d:%d", professionId, ns.mapping.timestamp.ToValue(professionData.lastUpdate)))
+    if ns.IsRetail then
+      local guildCache = ns.randomThings.craftingOrders.GetGuildCache(true)
+      if guildCache then -- sent even when empty, so others know we can read crafting orders and send us theirs
+        local professionPairs = {}
+        for professionId, professionData in pairs(guildCache) do
+          tinsert(professionPairs, sformat("%d:%d", professionId, ns.mapping.timestamp.ToValue(professionData.lastUpdate)))
+        end
+        tinsert(temp, "C" .. tconcat(professionPairs, ","))
       end
-      tinsert(temp, "C" .. tconcat(professionPairs, ","))
     end
     tinsert(temp, sformat("B%s", addonVersion))
     return sformat("%s%s", currentUsage.generalUpdateCheck, tconcat(temp, "^"))
@@ -1235,7 +1258,7 @@ function ns.mapping.GetMsgData(context, data, timestamp, key)
     return sformat("%s%s%s%s", currentUsage.bonusCoinUsage, string.char(#lastUpdate), lastUpdate, SerializeCBOR(data))
   end
   if context == ns.enums.context.itemCache then
-    ---@cast data wowutils_ownChar|wowutils_otherChar
+    ---@cast data wowutils_ownChar|wowutils_otherChar|wowutils_ownChar_forever|wowutils_otherChar_forever
     local lastUpdate = tostring(data.itemCacheUpdated or 0)
     return sformat("%s%s%s%s", currentUsage.itemCache, string.char(#lastUpdate), lastUpdate, SerializeCBOR(data.itemCache2))
   end

@@ -59,30 +59,36 @@ function ns.events.CURRENCY_DISPLAY_UPDATE(...)
   ns.currency.CURRENCY_DISPLAY_UPDATE(...)
 end
 
-ns.events.eventFrame:RegisterEvent("BONUS_ROLL_RESULT")
-function ns.events.BONUS_ROLL_RESULT(...)
-  ns.items.CacheBonusRollResult(...)
-end
-ns.events.eventFrame:RegisterEvent("SPELL_CONFIRMATION_PROMPT")
-function ns.events.SPELL_CONFIRMATION_PROMPT(...)
-  ns.items.CacheBonusRollPopup(...)
+if ns.IsRetail then
+  ns.events.eventFrame:RegisterEvent("BONUS_ROLL_RESULT")
+  function ns.events.BONUS_ROLL_RESULT(...)
+    ns.items.CacheBonusRollResult(...)
+  end
+  ns.events.eventFrame:RegisterEvent("SPELL_CONFIRMATION_PROMPT")
+  function ns.events.SPELL_CONFIRMATION_PROMPT(...)
+    ns.items.CacheBonusRollPopup(...)
+  end
 end
 ns.events.eventFrame:RegisterEvent("PLAYER_LOGIN")
 function ns.events.PLAYER_LOGIN(...)
   for currencyId, mapId in pairs(ns.config.currencies) do
     ns.currency.CacheCurrency(currencyId)
   end
-  ns.me.serverSlug = GetNormalizedRealmName()
-  ns.events.PLAYER_GUILD_UPDATE("player")
   private.checkForWeeklyReset()
-  if not C_AddOns.IsAddOnLoaded("Blizzard_WeeklyRewards") then
-    C_AddOns.LoadAddOn("Blizzard_WeeklyRewards")
+  ns.events.PLAYER_GUILD_UPDATE("player")
+  if ns.IsRetail then
+    ns.me.serverSlug = GetNormalizedRealmName()
+    if not C_AddOns.IsAddOnLoaded("Blizzard_WeeklyRewards") then
+      C_AddOns.LoadAddOn("Blizzard_WeeklyRewards")
+    end
+    ns.database.SaveToCurrentCharacterDB(ns.enums.context.serverSlugUpdate, nil, ns.me.serverSlug)
+    ns.randomThings.craftingOrders.PruneAllExpired() -- whatever expired while we were offline
+    C_Timer.After(5, ns.items.StartEncounterLootScan)
   end
-  ns.database.SaveToCurrentCharacterDB(ns.enums.context.serverSlugUpdate, nil, ns.me.serverSlug)
-  ns.randomThings.craftingOrders.PruneAllExpired() -- whatever expired while we were offline
   C_Timer.After(10, ns.items.InitialCaching)
-  C_Timer.After(5, ns.items.StartEncounterLootScan)
-  RequestRaidInfo() -- lockouts get scanned from the UPDATE_INSTANCE_INFO this fires
+  if not ns.config.lockoutsDisabled then
+    RequestRaidInfo() -- lockouts get scanned from the UPDATE_INSTANCE_INFO this fires
+  end
 end
 
 ns.events.eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
@@ -99,57 +105,71 @@ ns.events.eventFrame:RegisterEvent("QUEST_LOG_UPDATE")
 function ns.events.QUEST_LOG_UPDATE(...)
   ns.CheckQuests(...)
 end
-if WowUtilsDB.options.warboundOptions.enabled then -- toggled from gui
-  ns.events.eventFrame:RegisterEvent("CHAT_MSG_LOOT")
-end
-function ns.events.CHAT_MSG_LOOT(...)
-  ns.items.CHAT_MSG_LOOT(...)
-end
-
-ns.events.eventFrame:RegisterEvent("CRAFTINGORDERS_ORDER_PLACEMENT_RESPONSE")
-function ns.events.CRAFTINGORDERS_ORDER_PLACEMENT_RESPONSE(...)
-  ns.randomThings.craftingOrders.CRAFTINGORDERS_ORDER_PLACEMENT_RESPONSE(...)
+if ns.IsRetail then
+  if WowUtilsDB.options.warboundOptions.enabled then -- toggled from gui
+    ns.events.eventFrame:RegisterEvent("CHAT_MSG_LOOT")
+  end
+  function ns.events.CHAT_MSG_LOOT(...)
+    ns.items.CHAT_MSG_LOOT(...)
+  end
 end
 
---[[
-ns.events.eventFrame:RegisterEvent("CRAFTINGORDERS_CAN_REQUEST")
-function ns.events.CRAFTINGORDERS_CAN_REQUEST(...)
-  ns.randomThings.craftingOrders.CRAFTINGORDERS_CAN_REQUEST(...)
+if ns.IsRetail then
+  ns.events.eventFrame:RegisterEvent("CRAFTINGORDERS_ORDER_PLACEMENT_RESPONSE")
+  function ns.events.CRAFTINGORDERS_ORDER_PLACEMENT_RESPONSE(...)
+    ns.randomThings.craftingOrders.CRAFTINGORDERS_ORDER_PLACEMENT_RESPONSE(...)
+  end
+
+  --[[
+  ns.events.eventFrame:RegisterEvent("CRAFTINGORDERS_CAN_REQUEST")
+  function ns.events.CRAFTINGORDERS_CAN_REQUEST(...)
+    ns.randomThings.craftingOrders.CRAFTINGORDERS_CAN_REQUEST(...)
+  end
+  --]]
+  ns.events.eventFrame:RegisterEvent("CRAFTINGORDERS_UPDATE_ORDER_COUNT")
+  function ns.events.CRAFTINGORDERS_UPDATE_ORDER_COUNT(...)
+    ns.randomThings.craftingOrders.CRAFTINGORDERS_UPDATE_ORDER_COUNT(...)
+  end
+  ns.events.eventFrame:RegisterEvent("CRAFTINGORDERS_SHOW_CUSTOMER")
+  function ns.events.CRAFTINGORDERS_SHOW_CUSTOMER(...)
+    ns.randomThings.craftingOrders.CRAFTINGORDERS_SHOW_CUSTOMER(...)
+  end
+  ns.events.eventFrame:RegisterEvent("CRAFTINGORDERS_ORDER_CANCEL_RESPONSE")
+  function ns.events.CRAFTINGORDERS_ORDER_CANCEL_RESPONSE(...)
+    ns.randomThings.craftingOrders.CRAFTINGORDERS_ORDER_CANCEL_RESPONSE(...)
+  end
+  --CRAFTINGORDERS_HIDE_CUSTOMER
 end
---]]
-ns.events.eventFrame:RegisterEvent("CRAFTINGORDERS_UPDATE_ORDER_COUNT")
-function ns.events.CRAFTINGORDERS_UPDATE_ORDER_COUNT(...)
-  ns.randomThings.craftingOrders.CRAFTINGORDERS_UPDATE_ORDER_COUNT(...)
-end
-ns.events.eventFrame:RegisterEvent("CRAFTINGORDERS_SHOW_CUSTOMER")
-function ns.events.CRAFTINGORDERS_SHOW_CUSTOMER(...)
-  ns.randomThings.craftingOrders.CRAFTINGORDERS_SHOW_CUSTOMER(...)
-end
-ns.events.eventFrame:RegisterEvent("CRAFTINGORDERS_ORDER_CANCEL_RESPONSE")
-function ns.events.CRAFTINGORDERS_ORDER_CANCEL_RESPONSE(...)
-  ns.randomThings.craftingOrders.CRAFTINGORDERS_ORDER_CANCEL_RESPONSE(...)
-end
---CRAFTINGORDERS_HIDE_CUSTOMER
 ns.events.eventFrame:RegisterUnitEvent("PLAYER_GUILD_UPDATE", "player")
 function ns.events.PLAYER_GUILD_UPDATE(unitId)
   local guildName, _, _, guildRealm = GetGuildInfo("player")
   wipe(ns.currentGuildSlugs)
   C_GuildInfo.GuildRoster() -- requests update to roster
-  C_Timer.After(0.2, function()
-      local name, rankName, rankIndex, level, classDisplayName, zone, publicNote, officerNote, isOnline, status, class, achievementPoints, achievementRank, isMobile, canSoR, repStanding, guid
-      for i = 1, 1000 do
-          name, rankName, rankIndex, level, classDisplayName, zone, publicNote, officerNote, isOnline, status, class, achievementPoints, achievementRank, isMobile, canSoR, repStanding, guid = GetGuildRosterInfo(i)
-          if not name then
-              break
-          end
-          local charName, server = ns.helpers.SplitFullName(name)
-          -- a guildmate on our own realm comes back without one, and GetRealmId answers 0 for a
-          -- realm it cannot place, which would collapse all of them onto the same bogus slug. an
-          -- unresolvable realm still has to stay 0 though, guessing our own would be worse
-          local realmId = server and ns.GetRealmId(nil, server) or ns.me.realmId
-          ns.currentGuildSlugs[string.format("%s-%d", charName, realmId):lower()] = true
+  C_Timer.After(0.2, ns.IsRetail and function()
+    local name, rankName, rankIndex, level, classDisplayName, zone, publicNote, officerNote, isOnline, status, class, achievementPoints, achievementRank, isMobile, canSoR, repStanding, guid
+    for i = 1, 1000 do
+      name, rankName, rankIndex, level, classDisplayName, zone, publicNote, officerNote, isOnline, status, class, achievementPoints, achievementRank, isMobile, canSoR, repStanding, guid = GetGuildRosterInfo(i)
+      if not name then
+        break
       end
-      ns.database.CheckEligibleSyncLists()
+      local charName, server = ns.helpers.SplitFullName(name)
+      -- a guildmate on our own realm comes back without one, and GetRealmId answers 0 for a
+      -- realm it cannot place, which would collapse all of them onto the same bogus slug. an
+      -- unresolvable realm still has to stay 0 though, guessing our own would be worse
+      local realmId = server and ns.GetRealmId(nil, server) or ns.me.realmId
+      ns.currentGuildSlugs[string.format("%s-%d", charName, realmId):lower()] = true
+    end
+    ns.database.CheckEligibleSyncLists()
+  end or function()
+    local name
+    for i = 1, 1000 do
+      name = GetGuildRosterInfo(i)
+      if not name then
+        break
+      end
+      ns.currentGuildSlugs[name:gsub(" ", "-"):lower()] = true
+    end
+    ns.database.CheckEligibleSyncLists()
   end)
   if not guildName then
     ns.Debug.print("Currently not in a guild")
@@ -159,20 +179,22 @@ function ns.events.PLAYER_GUILD_UPDATE(unitId)
   else
     ns.Debug.print("Is in a guild %s-%s", tostring(guildName), tostring(guildRealm))
   end
-  if not ns.me.serverSlug then
-    local serverSlug = GetNormalizedRealmName()
-    ns.me.serverSlug = serverSlug
-    if not serverSlug then
-      ns.Debug.print("Could not get server slug for player")
-      return false
+  if ns.IsRetail then
+    if not ns.me.serverSlug then
+      local serverSlug = GetNormalizedRealmName()
+      ns.me.serverSlug = serverSlug
+      if not serverSlug then
+        ns.Debug.print("Could not get server slug for player")
+        return false
+      end
     end
   end
   ns.me.guildInfo = {
     name = guildName,
-    realm = guildRealm or ns.me.serverSlug,
-    fullSlug = guildName .. "-" .. (guildRealm or ns.me.serverSlug),
+    realm = ns.IsRetail and (guildRealm or ns.me.serverSlug),
+    fullSlug = ns.IsRetail and (guildName .. "-" .. (guildRealm or ns.me.serverSlug)) or guildName,
     ---@diagnostic disable-next-line: param-type-mismatch
-    dbSlug = guildName.. "-" .. ns.GetRealmId(nil, guildRealm or ns.me.serverSlug)
+    dbSlug = ns.IsRetail and (guildName.. "-" .. ns.GetRealmId(nil, guildRealm or ns.me.serverSlug)) or guildName
   }
   ns.database.SaveToCurrentCharacterDB(ns.enums.context.guildInfo, nil, ns.me.guildInfo.dbSlug)
 end
@@ -187,10 +209,13 @@ function ns.events.UPDATE_INSTANCE_INFO(...)
   ns.CheckLockouts(...)
 end
 
-ns.events.eventFrame:RegisterEvent("WEEKLY_REWARDS_UPDATE")
-function ns.events.WEEKLY_REWARDS_UPDATE(...)
-  ns.GreatVaultUpdate(...)
+if ns.IsRetail then
+  ns.events.eventFrame:RegisterEvent("WEEKLY_REWARDS_UPDATE")
+  function ns.events.WEEKLY_REWARDS_UPDATE(...)
+    ns.GreatVaultUpdate(...)
+  end
 end
+
 ns.events.eventFrame:RegisterEvent("LOADING_SCREEN_ENABLED")
 function ns.events.LOADING_SCREEN_ENABLED()
     ns.InLoadingScreen = true
@@ -207,9 +232,11 @@ function ns.events.PLAYER_LEAVING_WORLD(...)
   ns.database.SaveToCurrentCharacterDB(ns.enums.context.lastLogout, nil, GetServerTime())
 end
 
-ns.events.eventFrame:RegisterEvent("CHALLENGE_MODE_MAPS_UPDATE")
-function ns.events.CHALLENGE_MODE_MAPS_UPDATE(...)
-  ns.randomThings.dungeonsDone.CHALLENGE_MODE_MAPS_UPDATE(...)
+if ns.IsRetail then
+  ns.events.eventFrame:RegisterEvent("CHALLENGE_MODE_MAPS_UPDATE")
+  function ns.events.CHALLENGE_MODE_MAPS_UPDATE(...)
+    ns.randomThings.dungeonsDone.CHALLENGE_MODE_MAPS_UPDATE(...)
+  end
 end
 
 ns.events.eventFrame:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")
@@ -229,17 +256,19 @@ function ns.events.PLAYER_REGEN_ENABLED(...)
 end
 
 do
-  local whitelistedDifs = {
+  local whitelistedDifs = ns.IsRetail and {
     [16] = true, -- Mythic
     [15] = true, -- Heroic
     [14] = true, -- Normal
     [233] = true, -- Mythic - Flex
-  }
+  } or {}
   ns.events.eventFrame:RegisterEvent("ENCOUNTER_END")
   function ns.events.ENCOUNTER_END(encounterID, encounterName, difficultyID, groupSize, success, npcs, ...)
     if not (whitelistedDifs[difficultyID] and success == 1) then return end
     ns.communication.SendInfoForLoot()
-    RequestRaidInfo() -- refresh lockouts
+    if not ns.config.lockoutsDisabled then
+      RequestRaidInfo() -- refresh lockouts
+    end
   end
 end
 
@@ -296,4 +325,11 @@ do
     _f:RegisterEvent(event)
   end
   _f:SetScript("OnEvent", private.checkForWeeklyReset)
+end
+
+if ns.IsForever then -- loot drop tracking
+  ns.events.eventFrame:RegisterEvent("LOOT_READY")
+  function ns.events.LOOT_READY(...)
+    ns.randomThings.lootWindows.LOOT_READY(...)
+  end
 end

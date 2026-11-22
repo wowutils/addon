@@ -7,7 +7,7 @@
 ---@type string, wowutilsPrivate
 local addon_name, ns = ...
 
-do -- Weekly vault rewards
+if ns.IsRetail then -- Weekly vault rewards
   local alreadyHookedWeeklyRewards = false
   local alreadyPicked = false
   local scanTime
@@ -175,6 +175,7 @@ do -- Raid lockouts
 
   -- only call from UPDATE_INSTANCE_INFO, before the first one C_RaidLocks has nothing and everything would read as available
   function ns.CheckLockouts()
+    if ns.config.lockoutsDisabled then return end
     local value = 0
     local bit = 0
     for _, raid in ipairs(config.raids) do

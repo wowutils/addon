@@ -499,24 +499,26 @@ local function BuildDetailTextForCharacter(char)
   tinsert(lines, "Last update received " .. ns.helpers.GetFormatedLastUpdateTime(char.lastUpdateReceived))
   tinsert(lines, "Last logout " .. ns.helpers.GetFormatedLastUpdateTime(char.lastLogout))
   tinsert(lines, "Droptimizer key: " .. tostring(char.droptimizerKey or "-"))
-  tinsert(lines, sformat("Sparks %s: %s", ns.helpers.GetFormatedLastUpdateTime(char.craftingItemsUpdated), char.craftingItems or 0))
+  if ns.IsRetail then -- sparks, vault and weekly rewards aren't tracked on forever
+    tinsert(lines, sformat("Sparks %s: %s", ns.helpers.GetFormatedLastUpdateTime(char.craftingItemsUpdated), char.craftingItems or 0))
 
-  tinsert(lines, "Vault data " .. ns.helpers.GetFormatedLastUpdateTime(char.vaultDataLastUpdate))
-  if type(char.vaultData) ~= "table" or not next(char.vaultData) then
-    tinsert(lines, pad("none"))
-  end
-  for _, vaultData in ipairs(safeTable(char.vaultData)) do
-    ---@cast vaultData wowutils_vaultData_items
-    tinsert(lines, pad(sformat("%s (%s)%s", vaultData.itemId == 1 and "Currency" or vaultData.itemId == 2 and "Coin" or vaultData.itemLink or UNKNOWN, (vaultData.itemLevel or 0) > 0 and vaultData.itemLevel or "?", vaultData.picked and " |cff00ff00Picked|r" or "")))
-  end
-  tinsert(lines, "Weekly Rewards " .. ns.helpers.GetFormatedLastUpdateTime(char.weeklyRewardsUpdate))
-  local weeklyRewardsFound = false
-  for k,v in pairs(safeTable(char.weeklyRewards)) do
-    weeklyRewardsFound = true
-    tinsert(lines, pad(sformat("%s : %s", k, v)))
-  end
-  if not weeklyRewardsFound then
-    tinsert(lines, pad("none"))
+    tinsert(lines, "Vault data " .. ns.helpers.GetFormatedLastUpdateTime(char.vaultDataLastUpdate))
+    if type(char.vaultData) ~= "table" or not next(char.vaultData) then
+      tinsert(lines, pad("none"))
+    end
+    for _, vaultData in ipairs(safeTable(char.vaultData)) do
+      ---@cast vaultData wowutils_vaultData_items
+      tinsert(lines, pad(sformat("%s (%s)%s", vaultData.itemId == 1 and "Currency" or vaultData.itemId == 2 and "Coin" or vaultData.itemLink or UNKNOWN, (vaultData.itemLevel or 0) > 0 and vaultData.itemLevel or "?", vaultData.picked and " |cff00ff00Picked|r" or "")))
+    end
+    tinsert(lines, "Weekly Rewards " .. ns.helpers.GetFormatedLastUpdateTime(char.weeklyRewardsUpdate))
+    local weeklyRewardsFound = false
+    for k,v in pairs(safeTable(char.weeklyRewards)) do
+      weeklyRewardsFound = true
+      tinsert(lines, pad(sformat("%s : %s", k, v)))
+    end
+    if not weeklyRewardsFound then
+      tinsert(lines, pad("none"))
+    end
   end
   tinsert(lines, "Currency " .. ns.helpers.GetFormatedLastUpdateTime(char.currencyUpdated))
   local currencyFound =  false
@@ -541,23 +543,25 @@ local function BuildDetailTextForCharacter(char)
       tinsert(lines, pad(sformat("isWeeklyQuest: %s", getColoredBoolean(questData.isWeeklyQuest)), 2))
     end
   end
-  tinsert(lines, "Free updagre up to " .. ns.helpers.GetFormatedLastUpdateTime(char.watermarksUpdated))
-  local watermarksFound = false
-  for slotId, ilvl in pairs(safeTable(char.watermarks)) do
-    watermarksFound = true
-    local slotName = watermarkNameCache[slotId]
-    tinsert(lines, pad(sformat("%s: %s", slotName, ilvl)))
-  end
-  if not watermarksFound then
-    tinsert(lines, pad("none"))
-  end
-  tinsert(lines, "Bonus coin usage: " .. ns.helpers.GetFormatedLastUpdateTime(char.bonusCoinUsageUpdated))
-  if char.bonusCoinUsage and #char.bonusCoinUsage > 0 then
-    for _, v in ipairs(char.bonusCoinUsage) do
-      tinsert(lines, pad(sformat("%s %s %s", ns.helpers.GetIconTextureStringForSpecId(v.specId), v.itemLink, ns.helpers.GetFormatedLastUpdateTime(v.receiveTime))))
+  if ns.IsRetail then -- watermarks and bonus coins aren't tracked on forever
+    tinsert(lines, "Free updagre up to " .. ns.helpers.GetFormatedLastUpdateTime(char.watermarksUpdated))
+    local watermarksFound = false
+    for slotId, ilvl in pairs(safeTable(char.watermarks)) do
+      watermarksFound = true
+      local slotName = watermarkNameCache[slotId]
+      tinsert(lines, pad(sformat("%s: %s", slotName, ilvl)))
     end
-  else
-    tinsert(lines, pad("none"))
+    if not watermarksFound then
+      tinsert(lines, pad("none"))
+    end
+    tinsert(lines, "Bonus coin usage: " .. ns.helpers.GetFormatedLastUpdateTime(char.bonusCoinUsageUpdated))
+    if char.bonusCoinUsage and #char.bonusCoinUsage > 0 then
+      for _, v in ipairs(char.bonusCoinUsage) do
+        tinsert(lines, pad(sformat("%s %s %s", ns.helpers.GetIconTextureStringForSpecId(v.specId), v.itemLink, ns.helpers.GetFormatedLastUpdateTime(v.receiveTime))))
+      end
+    else
+      tinsert(lines, pad("none"))
+    end
   end
   return table.concat(lines, "\n")
 end
@@ -571,7 +575,9 @@ local function BuildDetailTextForDroptimizer(entry)
   tinsert(lines, "Key: " .. tostring(entry.key or "-"))
   tinsert(lines, "Character: " .. tostring(data.characterName or "-"))
   tinsert(lines, "Realm ID: " .. tostring(data.realmId or "-"))
-  tinsert(lines, "Server Slug:" .. ns.GetRealmSlug(data.region, data.realmId))
+  if ns.IsRetail then -- realm data isn't loaded on forever
+    tinsert(lines, "Server Slug:" .. ns.GetRealmSlug(data.region, data.realmId))
+  end
   tinsert(lines, "Region: " .. tostring(data.region or "-"))
   tinsert(lines, "Last update: " .. ns.helpers.GetFormatedLastUpdateTime(data.lastUpdate or 0))
 
@@ -1018,6 +1024,259 @@ function GUI:CreateCraftingOrdersOptions(parent)
     toggle:SetChecked(o.professions[professionId] and true or false)
     previous = toggle
   end
+
+  -- work orders tab options, second column
+  local workOrdersLabel = CreateOptionLabel(parent, "Work Orders")
+  workOrdersLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", 380, -14)
+
+  local ownFirst = CreateCheckbox(parent, "Show own orders first in Work Orders page", function(checked)
+    o.ownFirst = checked
+  end)
+  ownFirst:SetPoint("TOPLEFT", workOrdersLabel, "BOTTOMLEFT", -4, -4)
+  ownFirst:SetChecked(o.ownFirst)
+
+  local workOrdersFirst = CreateCheckbox(parent, "Set Work Orders page first", function(checked)
+    o.workOrdersFirst = checked
+    self:LayoutTabs()
+  end)
+  workOrdersFirst:SetPoint("TOPLEFT", ownFirst, "BOTTOMLEFT", 0, -2)
+  workOrdersFirst:SetChecked(o.workOrdersFirst)
+end
+
+local WORKORDER_HEADER_HEIGHT = 22
+local WORKORDER_ICON_SIZE = 22 -- rows are 30 high, font sized (0) icons were tiny
+
+---@param expirationTime number
+---@return string
+local function FormatTimeLeft(expirationTime)
+  local left = math.max(0, expirationTime - GetServerTime())
+  local hours, minutes = floor(left / 3600), floor(left % 3600 / 60)
+  if hours > 0 then
+    return sformat("%dh %dm left", hours, minutes)
+  end
+  return sformat("%dm left", minutes)
+end
+
+---@param partialGuid string
+---@return string name
+---@return number? r
+---@return number? g
+---@return number? b
+local function GetCustomerDisplay(partialGuid)
+  local guid = ns.mapping.ConvertPartialGuidToGuid(partialGuid)
+  -- our db knows alts and synced characters even when the client hasn't seen them this session
+  local char = WowUtilsDB.ownCharacters[guid] or WowUtilsDB.others[guid]
+  local name, class = char and char.name, char and char.class
+  if not name then
+    local _, classFile, _, _, _, playerName = GetPlayerInfoByGUID(guid)
+    name, class = playerName, classFile
+  end
+  return name or "?", GetClassColorForValue(class)
+end
+
+---Open guild crafting orders from the synced cache, grouped into own / matching the notify settings / the rest.
+---@param parent Frame
+---@return fun() refresh
+function GUI:CreateWorkOrdersPanel(parent)
+  local o = WowUtilsDB.options.craftingOrders
+  local Refresh
+
+  -- the options for this tab live on the crafting orders page
+  local listHolder = parent
+  local _, content = CreateListPanel(listHolder)
+
+  local empty = listHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  empty:SetPoint("TOPLEFT", listHolder, "TOPLEFT", 14, -10)
+  empty:SetTextColor(unpack(COLORS.muted))
+
+  local rows, headers = {}, {}
+
+  -- names of uncached items come in later, one refresh for a whole batch of them
+  local pendingItems, refreshQueued = {}, false
+  local function QueueRefresh()
+    if refreshQueued then return end
+    refreshQueued = true
+    C_Timer.After(0.2, function()
+      refreshQueued = false
+      if parent:IsVisible() then Refresh() end
+    end)
+  end
+
+  ---@param itemId number
+  ---@return string
+  local function GetItemText(itemId)
+    local name = C_Item.GetItemNameByID(itemId)
+    if not name then
+      if not pendingItems[itemId] and C_Item.DoesItemExistByID(itemId) then
+        pendingItems[itemId] = true
+        Item:CreateFromItemID(itemId):ContinueOnItemLoad(function()
+          pendingItems[itemId] = nil
+          QueueRefresh()
+        end)
+      end
+      return sformat("item:%d", itemId)
+    end
+    local quality = C_Item.GetItemQualityByID(itemId)
+    local qualityColor = quality and ITEM_QUALITY_COLORS[quality]
+    return qualityColor and qualityColor.color:WrapTextInColorCode(name) or name
+  end
+
+  local function GetHeader(index)
+    local header = headers[index]
+    if not header then
+      header = CreateFrame("Frame", nil, content)
+      header:SetHeight(WORKORDER_HEADER_HEIGHT)
+      header:SetPoint("LEFT", content, "LEFT", 4, 0)
+      header:SetPoint("RIGHT", content, "RIGHT", -4, 0)
+
+      header.label = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+      header.label:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 4, 4)
+      header.label:SetTextColor(unpack(COLORS.text))
+
+      header.line = header:CreateTexture(nil, "ARTWORK")
+      header.line:SetColorTexture(unpack(COLORS.accent))
+      header.line:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 0, 0)
+      header.line:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", 0, 0)
+      header.line:SetHeight(1)
+      headers[index] = header
+    end
+    return header
+  end
+
+  local function GetRow(index)
+    local row = rows[index]
+    if not row then
+      row = CreateFrame("Frame", nil, content, "BackdropTemplate")
+      row:SetHeight(ROW_HEIGHT)
+      row:SetPoint("LEFT", content, "LEFT", 4, 0)
+      row:SetPoint("RIGHT", content, "RIGHT", -4, 0)
+      ApplyFlatTheme(row, COLORS.row, COLORS.border)
+      row:EnableMouse(true)
+
+      row.accent = row:CreateTexture(nil, "ARTWORK")
+      row.accent:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
+      row.accent:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 1, 1)
+      row.accent:SetWidth(3)
+
+      row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      row.name:SetPoint("LEFT", row, "LEFT", 12, 0)
+      row.name:SetJustifyH("LEFT")
+      row.name:SetWordWrap(false)
+
+      row.info = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      row.info:SetPoint("RIGHT", row, "RIGHT", -10, 0)
+      row.info:SetPoint("LEFT", row.name, "RIGHT", 10, 0)
+      row.info:SetJustifyH("RIGHT")
+      row.info:SetWordWrap(false)
+      row.info:SetTextColor(unpack(COLORS.muted))
+
+      row:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(unpack(COLORS.rowHover))
+        if self.itemId then
+          GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+          GameTooltip:SetItemByID(self.itemId)
+          GameTooltip:Show()
+        end
+      end)
+      row:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(unpack(self.baseColor or COLORS.row))
+        GameTooltip_Hide()
+      end)
+      rows[index] = row
+    end
+    return row
+  end
+
+  local function sortNewestFirst(a, b)
+    if a.seenAt ~= b.seenAt then return a.seenAt > b.seenAt end
+    if a.order.expirationTime ~= b.order.expirationTime then return a.order.expirationTime < b.order.expirationTime end
+    return a.orderId < b.orderId
+  end
+
+  Refresh = function()
+    for _, row in ipairs(rows) do row:Hide() end
+    for _, header in ipairs(headers) do header:Hide() end
+
+    local orders = ns.randomThings.craftingOrders.GetActiveOrders()
+    if not orders then
+      empty:SetText("Not in a guild")
+    elseif #orders == 0 then
+      empty:SetText("No open guild orders cached yet")
+    end
+    empty:SetShown(not orders or #orders == 0)
+    orders = orders or {}
+
+    local own, matching, other = {}, {}, {}
+    for _, entry in ipairs(orders) do
+      tinsert(entry.isOwn and own or entry.matches and matching or other, entry)
+    end
+    for _, group in ipairs({ own, matching, other }) do
+      table.sort(group, sortNewestFirst)
+    end
+
+    local ownGroup = { title = "Your orders", entries = own, color = COLORS.accent }
+    local groups = {
+      { title = "Matching notification settings", entries = matching, color = { 1, 0.82, 0, 1 } },
+      { title = "Other orders", entries = other, color = COLORS.muted },
+    }
+    tinsert(groups, o.ownFirst and 1 or #groups + 1, ownGroup)
+
+    local professionAtlases = ns.randomThings.craftingOrders.professionAtlases
+    local formatSeen = ns.randomThings.craftingOrders.FormatSeen
+    local y, rowIndex, headerIndex = -4, 0, 0
+    for _, group in ipairs(groups) do
+      if #group.entries > 0 then
+        headerIndex = headerIndex + 1
+        local header = GetHeader(headerIndex)
+        header:SetPoint("TOP", content, "TOP", 0, y)
+        header.label:SetText(sformat("%s (%d)", group.title, #group.entries))
+        header.line:SetColorTexture(unpack(group.color))
+        header:Show()
+        y = y - WORKORDER_HEADER_HEIGHT - ROW_SPACING - 2
+
+        for i, entry in ipairs(group.entries) do
+          rowIndex = rowIndex + 1
+          local row = GetRow(rowIndex)
+          local order = entry.order
+          row.itemId = order.itemId
+          row:SetPoint("TOP", content, "TOP", 0, y)
+
+          local atlas = professionAtlases[entry.professionId]
+          row.name:SetText(sformat("%s %s %s%s", atlas and CreateAtlasMarkup(atlas, WORKORDER_ICON_SIZE, WORKORDER_ICON_SIZE) or "",
+            CreateSimpleTextureMarkup(C_Item.GetItemIconByID(order.itemId) or 134400, WORKORDER_ICON_SIZE, WORKORDER_ICON_SIZE),
+            GetItemText(order.itemId), order.isRecraft and " (Recraft)" or ""))
+
+          local customer, r, g, b = GetCustomerDisplay(order.customerGuid)
+          if r then
+            customer = CreateColor(r, g, b):WrapTextInColorCode(customer)
+          end
+          local tip = (order.tip or 0) > 0 and C_CurrencyInfo.GetCoinTextureString(order.tip * 1e4, 0) or ""
+          row.info:SetText(sformat("%s   %s   %s  %s", customer, tip, FormatTimeLeft(order.expirationTime),
+            strtrim(formatSeen(entry.seenAt))))
+
+          row.baseColor = (i % 2 == 0) and COLORS.rowAlt or COLORS.row
+          row:SetBackdropColor(unpack(row.baseColor))
+          row.accent:SetColorTexture(unpack(group.color))
+          row:Show()
+          y = y - ROW_HEIGHT - ROW_SPACING
+        end
+        y = y - 6
+      end
+    end
+
+    content:SetHeight(math.max(1, -y + 4))
+  end
+
+  return Refresh
+end
+
+---called by randomThings whenever the crafting order cache changes
+function GUI:OnCraftingOrdersChanged()
+  if not (self.frame and self.frame:IsShown() and self.workOrdersRefresh) then return end
+  local active = self.tabs and self.tabs[self.activeTab]
+  if active and active.panel == self.workOrdersPanel then
+    self.workOrdersRefresh()
+  end
 end
 
 StaticPopupDialogs["WOWUTILS_DELETE_SYNCLIST"] = {
@@ -1222,44 +1481,6 @@ function GUI:Create()
   tabLine:SetPoint("BOTTOMRIGHT", tabHolder, "BOTTOMRIGHT", 0, 0)
   tabLine:SetHeight(1)
 
-  local generalBtn = CreateTab(tabHolder, "General")
-  generalBtn:SetPoint("BOTTOMLEFT", tabHolder, "BOTTOMLEFT", 0, 0)
-  generalBtn:SetScript("OnClick", function()
-    self:SetTab(1)
-  end)
-
-  local rosterBtn = CreateTab(tabHolder, "Roster")
-  rosterBtn:SetPoint("BOTTOMLEFT", generalBtn, "BOTTOMRIGHT", 4, 0)
-  rosterBtn:SetScript("OnClick", function()
-    self:SetTab(2)
-  end)
-
-  local droptimizerBtn = CreateTab(tabHolder, "Droptimizer")
-  droptimizerBtn:SetPoint("BOTTOMLEFT", rosterBtn, "BOTTOMRIGHT", 4, 0)
-  droptimizerBtn:SetScript("OnClick", function()
-    self:SetTab(3)
-  end)
-
-  local notificationsBtn = CreateTab(tabHolder, "Notifications")
-  notificationsBtn:SetPoint("BOTTOMLEFT", droptimizerBtn, "BOTTOMRIGHT", 4, 0)
-  notificationsBtn:SetScript("OnClick", function()
-    self:SetTab(4)
-  end)
-
-  local craftingOrdersBtn = CreateTab(tabHolder, "Crafting Orders")
-  craftingOrdersBtn:SetPoint("BOTTOMLEFT", notificationsBtn, "BOTTOMRIGHT", 4, 0)
-  craftingOrdersBtn:SetScript("OnClick", function()
-    self:SetTab(5)
-  end)
-
-  local syncListsBtn = CreateTab(tabHolder, "Sync Lists")
-  syncListsBtn:SetPoint("BOTTOMLEFT", craftingOrdersBtn, "BOTTOMRIGHT", 4, 0)
-  syncListsBtn:SetScript("OnClick", function()
-    self:SetTab(6)
-  end)
-
-  self.tabButtons = { generalBtn, rosterBtn, droptimizerBtn, notificationsBtn, craftingOrdersBtn, syncListsBtn }
-
   local panel = CreateFrame("Frame", nil, frame, "BackdropTemplate")
   panel:SetPoint("TOPLEFT", tabHolder, "BOTTOMLEFT", 0, -8)
   panel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -8, 8)
@@ -1267,31 +1488,35 @@ function GUI:Create()
 
   self.panel = panel
 
-  local generalPanel = CreateFrame("Frame", nil, panel)
-  generalPanel:SetAllPoints(panel)
-  generalPanel:Hide()
+  local function CreatePanel()
+    local p = CreateFrame("Frame", nil, panel)
+    p:SetAllPoints(panel)
+    p:Hide()
+    return p
+  end
 
-  local rosterPanel = CreateFrame("Frame", nil, panel)
-  rosterPanel:SetAllPoints(panel)
-  rosterPanel:Hide()
+  -- general only holds warbound options and crafting orders are retail only, both are left out on forever
+  local generalPanel = ns.IsRetail and CreatePanel() or nil
+  local rosterPanel = CreatePanel()
+  local droptimizerPanel = CreatePanel()
 
-  local droptimizerPanel = CreateFrame("Frame", nil, panel)
-  droptimizerPanel:SetAllPoints(panel)
-  droptimizerPanel:Hide()
-
-  local notificationsPanel = CreateFrame("Frame", nil, panel)
-  notificationsPanel:SetAllPoints(panel)
-  notificationsPanel:Hide()
+  local notificationsPanel = CreatePanel()
   self:CreateNotificationsOptions(notificationsPanel)
 
-  local craftingOrdersPanel = CreateFrame("Frame", nil, panel)
-  craftingOrdersPanel:SetAllPoints(panel)
-  craftingOrdersPanel:Hide()
-  self:CreateCraftingOrdersOptions(craftingOrdersPanel)
+  local craftingOrdersPanel
+  if ns.IsRetail then
+    craftingOrdersPanel = CreatePanel()
+    self:CreateCraftingOrdersOptions(craftingOrdersPanel)
+  end
 
-  local syncListsPanel = CreateFrame("Frame", nil, panel)
-  syncListsPanel:SetAllPoints(panel)
-  syncListsPanel:Hide()
+  local workOrdersPanel
+  if ns.IsRetail then
+    workOrdersPanel = CreatePanel()
+    self.workOrdersPanel = workOrdersPanel
+    self.workOrdersRefresh = self:CreateWorkOrdersPanel(workOrdersPanel)
+  end
+
+  local syncListsPanel = CreatePanel()
   self.syncListsRefresh = self:CreateSyncListsOptions(syncListsPanel)
 
   self.generalPanel = generalPanel
@@ -1299,39 +1524,41 @@ function GUI:Create()
   self.droptimizerPanel = droptimizerPanel
   self.notificationsPanel = notificationsPanel
 
-  local warboundOptions = WowUtilsDB.options.warboundOptions
+  if generalPanel then
+    local warboundOptions = WowUtilsDB.options.warboundOptions
 
-  local warboundSelfOnly
-  local function UpdateWarboundSelfOnlyState()
-    warboundSelfOnly:SetEnabled(warboundOptions.enabled)
-    warboundSelfOnly.label:SetAlpha(warboundOptions.enabled and 1 or 0.4)
-  end
-
-  local warboundEnabled = CreateCheckbox(generalPanel, "Show warbound drops", function(checked)
-    warboundOptions.enabled = checked
-    if checked then
-      ns.events.RegisterEvent("CHAT_MSG_LOOT")
-    else
-      ns.events.UnregisterEvent("CHAT_MSG_LOOT")
+    local warboundSelfOnly
+    local function UpdateWarboundSelfOnlyState()
+      warboundSelfOnly:SetEnabled(warboundOptions.enabled)
+      warboundSelfOnly.label:SetAlpha(warboundOptions.enabled and 1 or 0.4)
     end
-    UpdateWarboundSelfOnlyState()
-  end)
-  warboundEnabled:SetPoint("TOPLEFT", generalPanel, "TOPLEFT", 10, -6)
-  warboundEnabled:SetChecked(warboundOptions.enabled)
-  warboundEnabled:HookScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText("Show warbound drops", 1, 1, 1)
-    GameTooltip:AddLine("Tracks looted warbound items by parsing the chat. (Shows them in notifications)", nil, nil, nil, true)
-    GameTooltip:Show()
-  end)
-  warboundEnabled:HookScript("OnLeave", GameTooltip_Hide)
 
-  warboundSelfOnly = CreateCheckbox(generalPanel, "Own only", function(checked)
-    warboundOptions.selfOnly = checked
-  end)
-  warboundSelfOnly:SetPoint("TOPLEFT", warboundEnabled, "BOTTOMLEFT", 18, -2)
-  warboundSelfOnly:SetChecked(warboundOptions.selfOnly)
-  UpdateWarboundSelfOnlyState()
+    local warboundEnabled = CreateCheckbox(generalPanel, "Show warbound drops", function(checked)
+      warboundOptions.enabled = checked
+      if checked then
+        ns.events.RegisterEvent("CHAT_MSG_LOOT")
+      else
+        ns.events.UnregisterEvent("CHAT_MSG_LOOT")
+      end
+      UpdateWarboundSelfOnlyState()
+    end)
+    warboundEnabled:SetPoint("TOPLEFT", generalPanel, "TOPLEFT", 10, -6)
+    warboundEnabled:SetChecked(warboundOptions.enabled)
+    warboundEnabled:HookScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetText("Show warbound drops", 1, 1, 1)
+      GameTooltip:AddLine("Tracks looted warbound items by parsing the chat. (Shows them in notifications)", nil, nil, nil, true)
+      GameTooltip:Show()
+    end)
+    warboundEnabled:HookScript("OnLeave", GameTooltip_Hide)
+
+    warboundSelfOnly = CreateCheckbox(generalPanel, "Own only", function(checked)
+      warboundOptions.selfOnly = checked
+    end)
+    warboundSelfOnly:SetPoint("TOPLEFT", warboundEnabled, "BOTTOMLEFT", 18, -2)
+    warboundSelfOnly:SetChecked(warboundOptions.selfOnly)
+    UpdateWarboundSelfOnlyState()
+  end
 
   -- these only apply to the roster, so the bar lives inside that panel instead of the window header
   local filterBar = CreateFrame("Frame", nil, rosterPanel)
@@ -1354,11 +1581,13 @@ function GUI:Create()
   hideUntracked:SetPoint("LEFT", filterBar, "LEFT", 0, 0)
   hideUntracked:SetChecked(filters.hideUntracked and true or false)
 
-  local hideLowIlvl = CreateCheckbox(filterBar, "Hide Low ilvl characters", function(checked)
-    SetFilter("hideLowIlvl", checked)
-  end)
-  hideLowIlvl:SetPoint("LEFT", hideUntracked.label, "RIGHT", 14, -1)
-  hideLowIlvl:SetChecked(filters.hideLowIlvl and true or false)
+  if ns.IsRetail then -- filters on watermarks, which forever doesn't have
+    local hideLowIlvl = CreateCheckbox(filterBar, "Hide Low ilvl characters", function(checked)
+      SetFilter("hideLowIlvl", checked)
+    end)
+    hideLowIlvl:SetPoint("LEFT", hideUntracked.label, "RIGHT", 14, -1)
+    hideLowIlvl:SetChecked(filters.hideLowIlvl and true or false)
+  end
 
   local rosterList = CreateFrame("Frame", nil, rosterPanel)
   rosterList:SetPoint("TOPLEFT", filterBar, "BOTTOMLEFT", -10, -2)
@@ -1379,17 +1608,70 @@ function GUI:Create()
   self.rosterRefresh = rosterRefresh
   self.droptimizerRefresh = droptimizerRefresh
 
-  -- same order as tabButtons, refresh is optional for tabs without list data
-  self.tabs = {
-    { panel = generalPanel },
-    { panel = rosterPanel, refresh = rosterRefresh },
-    { panel = droptimizerPanel, refresh = droptimizerRefresh },
-    { panel = notificationsPanel },
-    { panel = craftingOrdersPanel },
-    { panel = syncListsPanel, refresh = self.syncListsRefresh },
+  -- buttons and tabs come from one list, so client specific tabs (nil panel) drop out without leaving gaps.
+  -- refresh is optional for tabs without list data
+  local tabDefs = {
+    { name = "General", panel = generalPanel },
+    { name = "Roster", panel = rosterPanel, refresh = rosterRefresh },
+    { name = "Droptimizer", panel = droptimizerPanel, refresh = droptimizerRefresh },
+    { name = "Notifications", panel = notificationsPanel },
+    { name = "Crafting Orders", panel = craftingOrdersPanel },
+    { name = "Work Orders", panel = workOrdersPanel, refresh = self.workOrdersRefresh },
+    { name = "Sync Lists", panel = syncListsPanel, refresh = self.syncListsRefresh },
   }
+  self.tabHolder = tabHolder
+  self.tabDefs = {}
+  for _, def in ipairs(tabDefs) do
+    if def.panel then
+      def.button = CreateTab(tabHolder, def.name)
+      tinsert(self.tabDefs, def)
+    end
+  end
+  self:LayoutTabs()
 
   self:SetTab(1)
+end
+
+---(re)builds the tab order from tabDefs, the work orders tab can be moved to the front from the crafting orders options
+function GUI:LayoutTabs()
+  if not self.tabDefs then return end
+  local activePanel = self.tabs and self.tabs[self.activeTab] and self.tabs[self.activeTab].panel
+
+  local ordered = {}
+  local workOrdersFirst = ns.IsRetail and WowUtilsDB.options.craftingOrders.workOrdersFirst
+  for _, def in ipairs(self.tabDefs) do
+    if workOrdersFirst and def.panel == self.workOrdersPanel then
+      tinsert(ordered, 1, def)
+    else
+      tinsert(ordered, def)
+    end
+  end
+
+  self.tabs = {}
+  self.tabButtons = {}
+  local previousBtn
+  for index, def in ipairs(ordered) do
+    local btn = def.button
+    btn:ClearAllPoints()
+    if previousBtn then
+      btn:SetPoint("BOTTOMLEFT", previousBtn, "BOTTOMRIGHT", 4, 0)
+    else
+      btn:SetPoint("BOTTOMLEFT", self.tabHolder, "BOTTOMLEFT", 0, 0)
+    end
+    btn:SetScript("OnClick", function()
+      self:SetTab(index)
+    end)
+    self.tabs[index] = { panel = def.panel, refresh = def.refresh }
+    self.tabButtons[index] = btn
+    previousBtn = btn
+    if def.panel == activePanel then
+      self.activeTab = index -- stay on the same page when the order changes under it
+    end
+  end
+
+  for i, btn in ipairs(self.tabButtons) do
+    btn:SetSelected(i == self.activeTab)
+  end
 end
 
 function GUI:SetTab(index)

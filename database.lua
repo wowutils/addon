@@ -7,19 +7,37 @@
 local addon_name, ns = ...
 ns.eligibleSyncLists = {}
 local GetServerTime, sformat = GetServerTime, string.format
----@class wowutilsSavedVariables
----@field lastCharacter wowutils_lastChar
----@field ownCharacters table<string, wowutils_ownChar>
----@field others table<string, wowutils_otherChar>
+
+-- save guard for copying or symlinking files between clients
+if WowUtilsDB and WowUtilsDB.lastClient and WowUtilsDB.lastClient ~= WOW_PROJECT_ID then
+  WowUtilsDB = nil
+  ns.print("Database was wiped, because client versions didnt match.")
+end
+
+---@class wowutilsSavedVariablesBase
 ---@field droptimizerData table<string, wowutilsDroptimizerData>
+---@field syncLists table<string, wowutilsSyncList>
 ---@field dbVersion number
 ---@field debug boolean?
 ---@field lastSeenWeeklyReset number
 ---@field lastDataImport number?
----@field syncLists table<string, wowutilsSyncList>
 ---@field configVersion number
+---@field lastClient number
+---@field localData wowutilsLocalData
+
+---@class wowutilsSavedVariables : wowutilsSavedVariablesBase
+---@field lastCharacter wowutils_lastChar
+---@field ownCharacters table<string, wowutils_ownChar>
+---@field others table<string, wowutils_otherChar>
 ---@field options wowutils_options
 ---@field craftingOrderCache table<string, table<number, wowutils_craftingOrderProfession>> guild dbSlug -> Enum.Profession -> data
+
+---@class wowutilsSavedVariables_forever : wowutilsSavedVariablesBase
+---@field lastCharacter wowutils_lastChar
+---@field ownCharacters table<string, wowutils_ownChar_forever>
+---@field others table<string, wowutils_otherChar_forever>
+---@field droptimizerData table<string, wowutilsDroptimizerData_forever>
+---@field options wowutils_options_forever
 
 ---@class wowutils_craftingOrderProfession
 ---@field lastScan number last time someone with the profession scanned guild orders
@@ -42,10 +60,16 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@field notifications wowutils_options_notifications
 ---@field craftingOrders wowutils_options_craftingOrders
 
+---@class wowutils_options_forever
+---@field characterFilters wowutils_options_characterFilters
+---@field notifications wowutils_options_notifications
+
 ---@class wowutils_options_craftingOrders
 ---@field tipThreshold number minimum tip in gold for a notification
 ---@field printToChat boolean also print notifications to chat
 ---@field professions table<number, boolean> Enum.Profession -> notify for it
+---@field ownFirst boolean work orders tab lists own orders above the rest instead of below
+---@field workOrdersFirst boolean work orders tab goes before general in the tab bar (and opens by default)
 
 ---@class wowutils_options_notifications
 ---@field x number offset from UIParent center
@@ -78,54 +102,69 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@class wowutils_ownChar : wowutils_otherChar
 ---@field lastLogout number
 
+---@class wowutils_ownChar_forever : wowutils_otherChar_forever
+---@field lastLogout number
+
 ---@class wowutils_currencyData
 ---@field current number
 ---@field totalEarned number
 
----@class wowutils_itemData
----@field itemId number
----@field quantity number
----@field itemLink string
----@field updated number
+---@class wowutilsLocalData
+---@field lootWindows table<string, wowutilsLocalData_lootWindowData>
 
----@class wowutils_otherChar
+---@class wowutilsLocalData_lootWindowData
+---@field seen number
+---@field characterGuid string
+---@field items wowutilsLocalData_lootWindowDataItem[]
+
+---@class wowutilsLocalData_lootWindowDataItem
+---@field itemLink string
+---@field count number
+---@field currencyId number?
+---@field questId number?
+
+---@class wowutils_otherChar_base
 ---@field guid string
 ---@field name string
 ---@field class string
 ---@field currency table<number, wowutils_currencyData> -- currencyId = data
 ---@field currencyUpdated number
----@field items table<number, wowutils_itemData>
----@field watermarks table<number, number> -- slot = ilvl
----@field watermarksUpdated number
 ---@field dataRefreshTimes table<string, number>
 ---@field lastUpdate number
 ---@field lastUpdateReceived number
----@field craftingItems number
----@field craftingItemsUpdated number
 ---@field region number
 ---@field guildSlug string?
----@field serverSlug string
 ---@field fullSlug string
 ---@field extra table<string, any>
 ---@field quests table<number, wowutils_quests> -- questId = data
 ---@field questsUpdated number
 ---@field lastWeeklyReset number
+---@field droptimizerKey string
+---@field addonVersion string
+---@field itemCacheUpdated number
+---@field lockouts number? raid lockout mask, layout from ns.config.lockouts, a set bit means the boss is still available. nil = never scanned
+---@field lockoutsUpdated number
+
+---@class wowutils_otherChar : wowutils_otherChar_base
+---@field watermarks table<number, number> -- slot = ilvl
+---@field watermarksUpdated number
+---@field craftingItems number
+---@field craftingItemsUpdated number
+---@field serverSlug string
 ---@field vaultData wowutils_vaultData_items[]
 ---@field vaultDataLastUpdate number
 ---@field weeklyRewards table<string, number> -- "type-index" = level
 ---@field weeklyRewardsUpdate number
----@field droptimizerKey string
 ---@field bonusCoinUsage wowutils_bonusCoinUsage[]
 ---@field bonusCoinUsageUpdated number
 ---@field bonusCoinScannedHistory table<number, wowutils_bonuscoinMissingItems[]> -- specID = missingItems[]
 ---@field bonusCoinScannedHistoryUpdated number
----@field addonVersion string
 ---@field itemCache2 table<wowutils_enums_itemCacheType, wowutils_itemcache>
----@field itemCacheUpdated number
----@field lockouts number? raid lockout mask, layout from ns.config.lockouts, a set bit means the boss is still available. nil = never scanned
----@field lockoutsUpdated number
 ---@field dungeonsDone table<number, number> -- keyLevel = keysDone
 ---@field dungeonsUpdated number
+
+---@class wowutils_otherChar_forever : wowutils_otherChar_base
+---@field itemCache2 table<wowutils_enums_itemCacheType, wowutils_itemcache>
 
 ---@class wowutils_bonuscoinMissingItems
 ---@field itemId number
@@ -165,6 +204,16 @@ local GetServerTime, sformat = GetServerTime, string.format
 ---@field claimID number
 
 ---@class wowutilsDroptimizerData
+---@field specs table<number, table<string, wowutilsDroptimizerData_sims>>
+---@field characterName string
+---@field lastUpdate number
+---@field realmId number
+---@field region number
+---@field class number
+---@field wishlist table<string, wowutilsDroptimizerData_wishlistItem>
+---@field groupId string? last import group this character belonged to
+
+---@class wowutilsDroptimizerData_forever
 ---@field specs table<number, table<string, wowutilsDroptimizerData_sims>>
 ---@field characterName string
 ---@field lastUpdate number
@@ -223,9 +272,11 @@ local craftingOrderDefaults = {
   tipThreshold = 10,
   printToChat = true,
   professions = {}, -- everything off by default, same as the liquid addon
+  ownFirst = true,
+  workOrdersFirst = false,
 }
 
----@type wowutilsSavedVariables
+---@type wowutilsSavedVariables|wowutilsSavedVariables_forever
 WowUtilsDB = WowUtilsDB or {
   dbVersion = ns.config.currentDBVersion,
   lastCharacter = {},
@@ -236,57 +287,94 @@ WowUtilsDB = WowUtilsDB or {
   syncLists = {},
   options = {
     characterFilters = {},
-    warboundOptions = { enabled = false, selfOnly = false },
+    warboundOptions = ns.IsRetail and { enabled = false, selfOnly = false } or nil,
     notifications = CopyTable(notificationDefaults),
-    craftingOrders = CopyTable(craftingOrderDefaults),
+    craftingOrders = ns.IsRetail and CopyTable(craftingOrderDefaults) or nil,
   },
+  localData = { lootWindows = {} },
 }
 
+WowUtilsDB.lastClient = WOW_PROJECT_ID
 if not WowUtilsDB.ownCharacters[ns.me.guid] then
-  ---@type wowutils_ownChar
-  WowUtilsDB.ownCharacters[ns.me.guid] = {
-    guid = ns.me.guid,
-    name = ns.me.name,
-    class = select(2, UnitClass('player')),
-    currency = {},
-    items = {},
-    extra = {},
-    region = GetCurrentRegion(),
-    craftingItems = 0,
-    craftingItemsUpdated = 0,
-    currencyUpdated = 0,
-    lastLogout = 0,
-    watermarks = {},
-    watermarksUpdated = 0,
-    lastUpdate = 0,
-    quests = {},
-    vaultData = {},
-    weeklyRewards = {},
-    lastUpdateReceived = GetServerTime(),
-    droptimizerKey = ns.me.droptimizerKey,
-    weeklyRewardsUpdate = 0,
-    vaultDataLastUpdate = 0,
-    lastWeeklyReset = C_DateAndTime.GetWeeklyResetStartTime(),
-    questsUpdated = 0,
-    lockoutsUpdated = 0, -- lockouts itself stays nil until the first scan, 0 would read as everything killed
-  }
+  if ns.IsRetail then
+    ---@type wowutils_ownChar
+    WowUtilsDB.ownCharacters[ns.me.guid] = {
+      guid = ns.me.guid,
+      name = ns.me.name,
+      class = select(2, UnitClass('player')),
+      currency = {},
+      extra = {},
+      region = GetCurrentRegion(),
+      craftingItems = 0,
+      craftingItemsUpdated = 0,
+      currencyUpdated = 0,
+      lastLogout = 0,
+      watermarks = {},
+      watermarksUpdated = 0,
+      lastUpdate = 0,
+      quests = {},
+      vaultData = {},
+      weeklyRewards = {},
+      lastUpdateReceived = GetServerTime(),
+      droptimizerKey = ns.me.droptimizerKey,
+      weeklyRewardsUpdate = 0,
+      vaultDataLastUpdate = 0,
+      lastWeeklyReset = C_DateAndTime.GetWeeklyResetStartTime(),
+      questsUpdated = 0,
+      lockoutsUpdated = 0, -- lockouts itself stays nil until the first scan, 0 would read as everything killed
+    }
+  else -- forever
+      ---@type wowutils_ownChar_forever
+    WowUtilsDB.ownCharacters[ns.me.guid] = {
+      guid = ns.me.guid,
+      name = ns.me.name,
+      fullSlug = ns.me.droptimizerKey,
+      class = select(2, UnitClass('player')),
+      currency = {},
+      extra = {},
+      region = GetCurrentRegion(),
+      currencyUpdated = 0,
+      lastLogout = 0,
+      lastUpdate = 0,
+      quests = {},
+      lastUpdateReceived = GetServerTime(),
+      droptimizerKey = ns.me.droptimizerKey,
+      weeklyRewardsUpdate = 0,
+      vaultDataLastUpdate = 0,
+      lastWeeklyReset = C_DateAndTime.GetWeeklyResetStartTime(),
+      questsUpdated = 0,
+      lockoutsUpdated = 0, -- lockouts itself stays nil until the first scan, 0 would read as everything killed
+    }
+  end
 else
   WowUtilsDB.ownCharacters[ns.me.guid].name = ns.me.name
   WowUtilsDB.ownCharacters[ns.me.guid].droptimizerKey = ns.me.droptimizerKey
   WowUtilsDB.ownCharacters[ns.me.guid].class = select(2, UnitClass('player'))
   WowUtilsDB.ownCharacters[ns.me.guid].region = ns.me.regionId
   WowUtilsDB.ownCharacters[ns.me.guid].lastWeeklyReset = C_DateAndTime.GetWeeklyResetStartTime()
+  if ns.IsForever then
+    WowUtilsDB.ownCharacters[ns.me.guid].fullSlug = ns.me.droptimizerKey
+  end
 end
 if not WowUtilsDB.syncLists then
   WowUtilsDB.syncLists = {}
 end
 if not WowUtilsDB.options then -- added on 1.0.4, existing installs have no table yet
-  WowUtilsDB.options = { characterFilters = {}, warboundOptions = { enabled = false, selfOnly = false }, notifications = CopyTable(notificationDefaults), craftingOrders = CopyTable(craftingOrderDefaults) }
+  WowUtilsDB.options = {
+      characterFilters = {},
+      notifications = CopyTable(notificationDefaults),
+    }
+  if ns.IsRetail then
+      WowUtilsDB.options.warboundOptions = {
+        enabled = false, selfOnly = false
+      }
+      WowUtilsDB.options.craftingOrders = CopyTable(craftingOrderDefaults)
+  end
 end
 if not WowUtilsDB.options.characterFilters then
   WowUtilsDB.options.characterFilters = {}
 end
-if not WowUtilsDB.options.warboundOptions then
+if ns.IsRetail and not WowUtilsDB.options.warboundOptions then
   WowUtilsDB.options.warboundOptions = { enabled = false, selfOnly = false }
 end
 if not WowUtilsDB.options.notifications then
@@ -298,37 +386,29 @@ for k, v in pairs(notificationDefaults) do
     WowUtilsDB.options.notifications[k] = type(v) == "table" and CopyTable(v) or v
   end
 end
-if not WowUtilsDB.options.craftingOrders then -- added on 1.0.8
-  WowUtilsDB.options.craftingOrders = CopyTable(craftingOrderDefaults)
-end
-for k, v in pairs(craftingOrderDefaults) do
-  if WowUtilsDB.options.craftingOrders[k] == nil then
-    WowUtilsDB.options.craftingOrders[k] = type(v) == "table" and CopyTable(v) or v
+if ns.IsRetail then
+  if not WowUtilsDB.options.craftingOrders then -- added on 1.0.8
+    WowUtilsDB.options.craftingOrders = CopyTable(craftingOrderDefaults)
+  end
+  for k, v in pairs(craftingOrderDefaults) do
+    if WowUtilsDB.options.craftingOrders[k] == nil then
+      WowUtilsDB.options.craftingOrders[k] = type(v) == "table" and CopyTable(v) or v
+    end
   end
 end
 if not WowUtilsDB.droptimizerData then -- the cleanup sweep below walks this on every client now
   WowUtilsDB.droptimizerData = {}
 end
-if not WowUtilsDB.craftingOrderCache then -- added on 1.0.8
+if ns.IsRetail and not WowUtilsDB.craftingOrderCache then -- added on 1.0.8
   WowUtilsDB.craftingOrderCache = {}
 end
--- early 1.0.8 builds kept orders as an array with orderId inside each entry, rekey those by orderId
---[=[
-for _, guildCache in pairs(WowUtilsDB.craftingOrderCache) do
-  for _, professionData in pairs(guildCache) do
-    local orders = professionData.orders --[[@as table]]
-    if type(orders) == "table" and orders[1] and orders[1].orderId then
-      local keyed = {}
-      for _, order in ipairs(orders) do
-        keyed[order.orderId] = order
-        order.orderId = nil
-      end
-      professionData.orders = keyed
-    end
-  end
+if not WowUtilsDB.localData then
+  WowUtilsDB.localData = { lootWindows = {} }
 end
---]=]
----@type wowutils_ownChar
+if not WowUtilsDB.localData.lootWindows then -- installs from before lootWindows existed
+  WowUtilsDB.localData.lootWindows = {}
+end
+---@type wowutils_ownChar|wowutils_ownChar_forever
 local charDB = WowUtilsDB.ownCharacters[ns.me.guid]
 local db = WowUtilsDB
 db.lastCharacter.guid = ns.me.guid
@@ -357,24 +437,26 @@ local function normalizeDroptimizerRecord(record)
 end
 
 if db.dbVersion < ns.config.currentDBVersion then
-  -- upgrade db based on version
-  if db.dbVersion < 3 then
-    for _, record in pairs(db.droptimizerData) do
-      normalizeDroptimizerRecord(record)
+  if ns.IsRetail then
+    -- upgrade db based on version
+    if db.dbVersion < 3 then
+      for _, record in pairs(db.droptimizerData) do
+        normalizeDroptimizerRecord(record)
+      end
+      -- normalizing only reshapes what we already stored, and db 2 never kept encounterId or
+      -- sourceItem at all. without a re-read nothing would know a piece comes from the catalyst
+      -- until the source file next happens to change
+      ns.forceDroptimizerReimport = true
     end
-    -- normalizing only reshapes what we already stored, and db 2 never kept encounterId or
-    -- sourceItem at all. without a re-read nothing would know a piece comes from the catalyst
-    -- until the source file next happens to change
-    ns.forceDroptimizerReimport = true
-  end
-  if db.dbVersion < 4 then
-    -- itemCache (guid keyed full links) was replaced by itemCache2, drop the old data and its timestamp
-    -- so nobody thinks they already have up to date items
-    for _, chars in pairs({ db.ownCharacters, db.others }) do
-      for _, charData in pairs(chars) do
-        ---@diagnostic disable-next-line: inject-field
-        charData.itemCache = nil
-        charData.itemCacheUpdated = nil
+    if db.dbVersion < 4 then
+      -- itemCache (guid keyed full links) was replaced by itemCache2, drop the old data and its timestamp
+      -- so nobody thinks they already have up to date items
+      for _, chars in pairs({ db.ownCharacters, db.others }) do
+        for _, charData in pairs(chars) do
+          ---@diagnostic disable-next-line: inject-field
+          charData.itemCache = nil
+          charData.itemCacheUpdated = nil
+        end
       end
     end
   end
@@ -386,25 +468,51 @@ ns.database = {}
 ns.database.NormalizeDroptimizerRecord = normalizeDroptimizerRecord
 ns.database.ownSlugs = {}
 do
-  local timestampFields = {
-    "lastUpdate", "currencyUpdated", "watermarksUpdated", "craftingItemsUpdated", "questsUpdated", "vaultDataLastUpdate",
-    "weeklyRewardsUpdate", "bonusCoinUsageUpdated", "lockoutsUpdated", "dungeonsUpdated",
-  }
-  local tableFields = { "currency", "watermarks", "quests", "vaultData", "weeklyRewards", "bonusCoinUsage", "dungeonsDone" }
-  ---fills in what older versions (or a broken sender) left out or got wrong, so readers don't have to check every field
-  ---@param char table
-  function ns.database.NormalizeCharRecord(char)
-    for _, key in ipairs(timestampFields) do
-      if type(char[key]) ~= "number" then char[key] = 0 end
-    end
-    for _, key in ipairs(tableFields) do
-      if type(char[key]) ~= "table" then char[key] = {} end
-    end
-    if type(char.craftingItems) ~= "number" then char.craftingItems = 0 end
-    -- these two mean something when nil (never scanned / never refreshed), so only drop wrong types
-    if char.lockouts ~= nil and type(char.lockouts) ~= "number" then char.lockouts = nil end
-    if char.dataRefreshTimes ~= nil and type(char.dataRefreshTimes) ~= "table" then char.dataRefreshTimes = nil end
+  local timestampFields
+  local tableFields
+  if ns.IsRetail then
+    timestampFields = {
+      "lastUpdate", "currencyUpdated", "watermarksUpdated", "craftingItemsUpdated", "questsUpdated", "vaultDataLastUpdate",
+      "weeklyRewardsUpdate", "bonusCoinUsageUpdated", "lockoutsUpdated", "dungeonsUpdated",
+    }
+    tableFields = { "currency", "watermarks", "quests", "vaultData", "weeklyRewards", "bonusCoinUsage", "dungeonsDone" }
+  else
+    timestampFields = {
+      "lastUpdate", "currencyUpdated", "questsUpdated", "lockoutsUpdated",
+    }
+    tableFields = { "currency", "quests"}
   end
+  if ns.IsRetail then
+    ---fills in what older versions (or a broken sender) left out or got wrong, so readers don't have to check every field
+    ---@param char table
+    function ns.database.NormalizeCharRecord(char)
+      for _, key in ipairs(timestampFields) do
+        if type(char[key]) ~= "number" then char[key] = 0 end
+      end
+      for _, key in ipairs(tableFields) do
+        if type(char[key]) ~= "table" then char[key] = {} end
+      end
+      if type(char.craftingItems) ~= "number" then char.craftingItems = 0 end
+      -- these two mean something when nil (never scanned / never refreshed), so only drop wrong types
+      if char.lockouts ~= nil and type(char.lockouts) ~= "number" then char.lockouts = nil end
+      if char.dataRefreshTimes ~= nil and type(char.dataRefreshTimes) ~= "table" then char.dataRefreshTimes = nil end
+    end
+  else
+    ---fills in what older versions (or a broken sender) left out or got wrong, so readers don't have to check every field
+    ---@param char table
+    function ns.database.NormalizeCharRecord(char)
+      for _, key in ipairs(timestampFields) do
+        if type(char[key]) ~= "number" then char[key] = 0 end
+      end
+      for _, key in ipairs(tableFields) do
+        if type(char[key]) ~= "table" then char[key] = {} end
+      end
+      -- these two mean something when nil (never scanned / never refreshed), so only drop wrong types
+      if char.lockouts ~= nil and type(char.lockouts) ~= "number" then char.lockouts = nil end
+      if char.dataRefreshTimes ~= nil and type(char.dataRefreshTimes) ~= "table" then char.dataRefreshTimes = nil end
+    end
+  end
+  
 end
 
 ---a guid change (race/faction change, delete + recreate) keeps the droptimizerKey, so the same key can
@@ -441,7 +549,7 @@ for _, char in pairs(WowUtilsDB.others) do
   ns.database.NormalizeCharRecord(char)
 end
 local clearOldConfigData = (db.configVersion or 0) < ns.config.configVersion
-local resetCraftingItems = (db.configVersion or 0) < 4
+local resetCraftingItems = ns.IsRetail and (db.configVersion or 0) < 4
 if clearOldConfigData then
   -- the import only re-reads a character when the source file is newer than what we already
   -- stored, so an existing install would never run the droptimizer prune until the next time
@@ -682,7 +790,7 @@ function ns.database.SaveToCurrentCharacterDB(context, id, data)
 
   if context == ns.enums.context.bonusCoin then
     ---@cast data wowutils_bonusCoinUsage
-    if not charDB.bonusCoinUsage then
+    if not charDB.bonusCoinUsage then 
       charDB.bonusCoinUsage = {}
     end
     tinsert(charDB.bonusCoinUsage, data)
@@ -753,8 +861,10 @@ end
 function ns.database.ResetWeeklyData(currentResetStart)
   charDB.lastWeeklyReset = currentResetStart
   for guid, charData in pairs(db.ownCharacters) do
-    wipe(charData.weeklyRewards)
-    wipe(charData.vaultData)
+    if ns.IsRetail then
+      wipe(charData.weeklyRewards)
+      wipe(charData.vaultData)
+    end
     do
       local toDelete = {}
       for questId, questData in pairs(charData.quests) do
@@ -837,18 +947,32 @@ do
     ns.Debug.print("removing stale droptimizer data for '%s'", k)
     WowUtilsDB.droptimizerData[k] = nil
   end
-  C_MythicPlus.RequestMapInfo()
-  local currentSeason = C_MythicPlus.GetCurrentSeason()
-  ns.Debug.print("Current M+ season: %s", currentSeason)
-  if currentSeason and currentSeason > 0 then -- returns -1 until the RequestMapInfo response arrives
-    for k,v in pairs(WowUtilsDB.ownCharacters) do
-      if v.bonusCoinUsage then
-        for i = #v.bonusCoinUsage, 1, -1 do
-          if v.bonusCoinUsage[i].season < currentSeason then
-            tremove(v.bonusCoinUsage, i)
+  wipe(toDelete)
+  if ns.IsRetail then
+    C_MythicPlus.RequestMapInfo()
+    local currentSeason = C_MythicPlus.GetCurrentSeason()
+    ns.Debug.print("Current M+ season: %s", currentSeason)
+    if currentSeason and currentSeason > 0 then -- returns -1 until the RequestMapInfo response arrives
+      for k,v in pairs(WowUtilsDB.ownCharacters) do
+        if v.bonusCoinUsage then
+          for i = #v.bonusCoinUsage, 1, -1 do
+            if v.bonusCoinUsage[i].season < currentSeason then
+              tremove(v.bonusCoinUsage, i)
+            end
           end
         end
       end
+    end
+  end
+  if ns.IsForever then
+    local lootWindowKeepThreshold = GetServerTime() - 60*60*24*2 -- 2 days
+    for k,v in pairs(WowUtilsDB.localData.lootWindows) do
+      if v.seen < lootWindowKeepThreshold then
+        toDelete[k] = true
+      end
+    end
+    for k in pairs(toDelete) do
+      WowUtilsDB.localData.lootWindows[k] = nil
     end
   end
 end

@@ -43,18 +43,32 @@ local function convertToCorrectUnit(unit, toDroptimizerKey)
       end
       local name, realm = select(6, GetPlayerInfoByGUID(unit))
       if not name or issecretvalue(name) or (realm and issecretvalue(realm)) then return nil end
-      return sformat("%s-%s", name:lower(), (realm == nil or realm == "") and ns.me.realmId or ns.GetRealmId(nil, realm))
+      if ns.IsRetail then
+        return sformat("%s-%s", name:lower(), (realm == nil or realm == "") and ns.me.realmId or ns.GetRealmId(nil, realm))
+      else -- forever
+        return name:gsub(" ", "-"):lower()
+      end
     end
     -- split on the first hyphen only: character names cannot contain one, but realm slugs do
     -- ("tarren-mill", "twisting-nether"), and taking just the leading word never resolves
-    local name, realm = strsplit("-", unit, 2)
-    if realm then -- its in Name-Realm format
-      return sformat("%s-%s", name:lower(), ns.GetRealmId(nil, realm))
+    if ns.IsRetail then
+      local name, realm = strsplit("-", unit, 2)
+      if realm then -- its in Name-Realm format
+        return sformat("%s-%s", name:lower(), ns.GetRealmId(nil, realm))
+      end
+      -- its either unitId or name without realm, so this should work just fine
+      name, realm = UnitNameUnmodified(Ambiguate(unit, "none"))
+      if not name or issecretvalue(name) or (realm and issecretvalue(realm)) then return nil end -- assume its an unitid that we cant currently get data from (or someone supplied a name without realm that cannot be used as unitId)
+      return sformat("%s-%s", name:lower(), (realm == nil or realm == "") and ns.me.realmId or ns.GetRealmId(nil, realm))
+    else -- forever
+      if unit:find(" ") or unit:find("-") then
+        return unit:gsub(" ", "-"):lower()
+      end
+      -- should be unitid
+      local firstName, lastName = UnitNameUnmodified(Ambiguate(unit, "none"))
+      if not firstName or not lastName or issecretvalue(firstName) then return nil end -- assume its an unitid that we cant currently get data from
+      return sformat("%s-%s", firstName:lower(), lastName:lower())
     end
-    -- its either unitId or name without realm, so this should work just fine
-    name, realm = UnitNameUnmodified(Ambiguate(unit, "none"))
-    if not name or issecretvalue(name) or (realm and issecretvalue(realm)) then return nil end -- assume its an unitid that we cant currently get data from (or someone supplied a name without realm that cannot be used as unitId)
-    return sformat("%s-%s", name:lower(), (realm == nil or realm == "") and ns.me.realmId or ns.GetRealmId(nil, realm))
   end
   if isGuid then return unit end
   local guid = UnitGUID(Ambiguate(unit, "none"))
@@ -63,7 +77,7 @@ local function convertToCorrectUnit(unit, toDroptimizerKey)
 end
 
 ---@param unit string unitId, guid, name or name-realm
----@return (wowutils_ownChar|wowutils_otherChar)? char reference, never hand this out directly
+---@return (wowutils_ownChar|wowutils_otherChar|wowutils_ownChar_forever|wowutils_otherChar_forever)? char reference, never hand this out directly
 ---@return string? guid
 local function findChar(unit)
   local guid = convertToCorrectUnit(unit)
@@ -100,13 +114,9 @@ local function findDroptimizerKey(unit)
   return convertToCorrectUnit(unit, true)
 end
 
---#endregion
-
---#region data points
-
 ---Everything we have on a character, use the getters below for a single data point.
 ---@param unit string
----@return (wowutils_ownChar|wowutils_otherChar)? character copy
+---@return (wowutils_ownChar|wowutils_otherChar|wowutils_ownChar_forever|wowutils_otherChar_forever)? character copy
 ---@return number? refreshed lastUpdateReceived
 ---@return number? updated lastUpdate
 function WowUtilsAPI.GetCharacterData(unit)
@@ -127,42 +137,87 @@ function WowUtilsAPI.GetCurrency(unit)
   return CopyTable(char.currency), ((char.dataRefreshTimes and char.dataRefreshTimes.currency) or 0), char.currencyUpdated or 0
 end
 
----Crest discount item levels.
----@param unit string
----@return table<number, number>? watermarks Enum.ItemRedundancySlot = itemLevel
----@return number? refreshed
----@return number? updated
-function WowUtilsAPI.GetWatermarks(unit)
-  if not unit or issecretvalue(unit) then return nil end
-  local char = findChar(unit)
-  if not (char and char.watermarks) then return nil end
-  return CopyTable(char.watermarks), ((char.dataRefreshTimes and char.dataRefreshTimes.watermarks) or 0), char.watermarksUpdated or 0
-end
+if ns.IsRetail then
+  ---Crest discount item levels.
+  ---@param unit string
+  ---@return table<number, number>? watermarks Enum.ItemRedundancySlot = itemLevel
+  ---@return number? refreshed
+  ---@return number? updated
+  function WowUtilsAPI.GetWatermarks(unit)
+    if not unit or issecretvalue(unit) then return nil end
+    local char = findChar(unit)
+    if not (char and char.watermarks) then return nil end
+    return CopyTable(char.watermarks), ((char.dataRefreshTimes and char.dataRefreshTimes.watermarks) or 0), char.watermarksUpdated or 0
+  end
 
----Rewards currently sitting in the great vault, use GetWeeklyRewards for the unlocked slots.
----@param unit string
----@return wowutils_vaultData_items[]? vaultData
----@return number? refreshed
----@return number? updated
-function WowUtilsAPI.GetVault(unit)
-  if not unit or issecretvalue(unit) then return nil end
-  local char = findChar(unit)
-  if not (char and char.vaultData) then return nil end
-  local refreshed = (char.dataRefreshTimes and char.dataRefreshTimes.vaultData) or 0
-  return CopyTable(char.vaultData), refreshed, char.vaultDataLastUpdate or 0
-end
+  ---Rewards currently sitting in the great vault, use GetWeeklyRewards for the unlocked slots.
+  ---@param unit string
+  ---@return wowutils_vaultData_items[]? vaultData
+  ---@return number? refreshed
+  ---@return number? updated
+  function WowUtilsAPI.GetVault(unit)
+    if not unit or issecretvalue(unit) then return nil end
+    local char = findChar(unit)
+    if not (char and char.vaultData) then return nil end
+    local refreshed = (char.dataRefreshTimes and char.dataRefreshTimes.vaultData) or 0
+    return CopyTable(char.vaultData), refreshed, char.vaultDataLastUpdate or 0
+  end
 
----Unlocked vault slots only, "activityType-index" = itemLevel.
----@param unit string
----@return table<string, number>? weeklyRewards
----@return number? refreshed
----@return number? updated
-function WowUtilsAPI.GetWeeklyRewards(unit)
-  if not unit or issecretvalue(unit) then return nil end
-  local char = findChar(unit)
-  if not (char and char.weeklyRewards) then return nil end
-  local refreshed = (char.dataRefreshTimes and char.dataRefreshTimes.weeklyRewards) or 0
-  return CopyTable(char.weeklyRewards), refreshed, char.weeklyRewardsUpdate or 0
+  ---Unlocked vault slots only, "activityType-index" = itemLevel.
+  ---@param unit string
+  ---@return table<string, number>? weeklyRewards
+  ---@return number? refreshed
+  ---@return number? updated
+  function WowUtilsAPI.GetWeeklyRewards(unit)
+    if not unit or issecretvalue(unit) then return nil end
+    local char = findChar(unit)
+    if not (char and char.weeklyRewards) then return nil end
+    local refreshed = (char.dataRefreshTimes and char.dataRefreshTimes.weeklyRewards) or 0
+    return CopyTable(char.weeklyRewards), refreshed, char.weeklyRewardsUpdate or 0
+  end
+
+  ---Amount of the tracked crafting item (spark) the character owns.
+  ---@param unit string
+  ---@return number? craftingItems
+  ---@return number? refreshed
+  ---@return number? updated
+  function WowUtilsAPI.GetCraftingItems(unit)
+    if not unit or issecretvalue(unit) then return nil end
+    local char = findChar(unit)
+    if not char then return nil end
+    local refreshed = (char.dataRefreshTimes and char.dataRefreshTimes.craftingItems) or 0
+    return char.craftingItems or 0, refreshed, char.craftingItemsUpdated or 0
+  end
+
+  ---Bonus rolls used this season.
+  ---@param unit string
+  ---@return wowutils_bonusCoinUsage[]? bonusCoinUsage
+  ---@return number? refreshed always 0, bonus coin usage is not refresh tracked
+  ---@return number? updated
+  function WowUtilsAPI.GetBonusCoinUsage(unit)
+    if not unit or issecretvalue(unit) then return nil end
+    local char = findChar(unit)
+    if not char then return nil end
+    return CopyTable(char.bonusCoinUsage or {}), 0, char.bonusCoinUsageUpdated or 0
+  end
+
+  ---Realm id for a character. This resolves an identifier rather than reading a stored data point,
+  ---so unlike the getters above it returns a single value with no timestamps, and it answers for
+  ---characters we have never seen as long as the realm itself is known.
+  ---@param unit string unitId, guid, name-realm, or a raw droptimizer key. a bare name resolves against your own realm
+  ---@return number? realmId nil when the realm cannot be resolved
+  function WowUtilsAPI.GetRealmId(unit)
+    if not unit or issecretvalue(unit) then return nil end
+    -- every accepted identifier collapses to the droptimizer key, which is "name-realmId". character
+    -- names cannot contain a hyphen, so the trailing number is unambiguous
+    local key = findDroptimizerKey(unit)
+    if not key then return nil end
+    local realmId = tonumber(key:match("%-(%d+)$"))
+    -- 0 is what ns.GetRealmId reports for a realm it does not know
+    if not realmId or realmId == 0 then return nil end
+    return realmId
+  end
+
 end
 
 ---@param unit string
@@ -177,30 +232,7 @@ function WowUtilsAPI.GetQuests(unit)
   return CopyTable(char.quests), refreshed, char.questsUpdated or 0
 end
 
----Amount of the tracked crafting item (spark) the character owns.
----@param unit string
----@return number? craftingItems
----@return number? refreshed
----@return number? updated
-function WowUtilsAPI.GetCraftingItems(unit)
-  if not unit or issecretvalue(unit) then return nil end
-  local char = findChar(unit)
-  if not char then return nil end
-  local refreshed = (char.dataRefreshTimes and char.dataRefreshTimes.craftingItems) or 0
-  return char.craftingItems or 0, refreshed, char.craftingItemsUpdated or 0
-end
 
----Bonus rolls used this season.
----@param unit string
----@return wowutils_bonusCoinUsage[]? bonusCoinUsage
----@return number? refreshed always 0, bonus coin usage is not refresh tracked
----@return number? updated
-function WowUtilsAPI.GetBonusCoinUsage(unit)
-  if not unit or issecretvalue(unit) then return nil end
-  local char = findChar(unit)
-  if not char then return nil end
-  return CopyTable(char.bonusCoinUsage or {}), 0, char.bonusCoinUsageUpdated or 0
-end
 ---Raid lockouts as a mask, one bit per boss per difficulty, a set bit means the boss is still available.
 ---Data from before the current weekly reset comes back as everything available. Use DecodeLockouts
 ---to read it, the bit layout changes between seasons.
@@ -257,26 +289,3 @@ function WowUtilsAPI.GetWishlist(unit)
   if not (data and data.wishlist) then return nil end
   return CopyTable(data.wishlist), 0, data.lastUpdate or 0
 end
-
---#endregion
-
---#region identifiers
-
----Realm id for a character. This resolves an identifier rather than reading a stored data point,
----so unlike the getters above it returns a single value with no timestamps, and it answers for
----characters we have never seen as long as the realm itself is known.
----@param unit string unitId, guid, name-realm, or a raw droptimizer key. a bare name resolves against your own realm
----@return number? realmId nil when the realm cannot be resolved
-function WowUtilsAPI.GetRealmId(unit)
-  if not unit or issecretvalue(unit) then return nil end
-  -- every accepted identifier collapses to the droptimizer key, which is "name-realmId". character
-  -- names cannot contain a hyphen, so the trailing number is unambiguous
-  local key = findDroptimizerKey(unit)
-  if not key then return nil end
-  local realmId = tonumber(key:match("%-(%d+)$"))
-  -- 0 is what ns.GetRealmId reports for a realm it does not know
-  if not realmId or realmId == 0 then return nil end
-  return realmId
-end
-
---#endregion

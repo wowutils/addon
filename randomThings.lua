@@ -3,7 +3,7 @@ local addon_name, ns = ...
 ---@class wowutilsPrivate
 ---@field randomThings table
 ns.randomThings = {}
-do -- crafting orders
+if ns.IsRetail then -- crafting orders
   ns.randomThings.craftingOrders = {}
   local lastOrder = {}
   EventRegistry:RegisterCallback("ProfessionsCustomerOrders.RecipeSelected", function(_, itemID)
@@ -49,19 +49,22 @@ do -- crafting orders
 
   -- used by the options gui for the toggles, and for the icons in notifications
   ns.randomThings.craftingOrders.notifyProfessions = {
-    { id = Enum.Profession.Alchemy, name = "Alchemy", icon = CreateAtlasMarkup("Mobile-Alchemy", 0, 0) },
-    { id = Enum.Profession.Blacksmithing, name = "Blacksmithing", icon = CreateAtlasMarkup("Mobile-Blacksmithing", 0, 0) },
-    { id = Enum.Profession.Enchanting, name = "Enchanting", icon = CreateAtlasMarkup("Mobile-Enchanting", 0, 0) },
-    { id = Enum.Profession.Engineering, name = "Engineering", icon = CreateAtlasMarkup("Mobile-Enginnering", 0, 0) }, -- blizzard typo
-    { id = Enum.Profession.Inscription, name = "Inscription", icon = CreateAtlasMarkup("Mobile-Inscription", 0, 0) },
-    { id = Enum.Profession.Jewelcrafting, name = "Jewelcrafting", icon = CreateAtlasMarkup("Mobile-Jewelcrafting", 0, 0) },
-    { id = Enum.Profession.Leatherworking, name = "Leatherworking", icon = CreateAtlasMarkup("Mobile-Leatherworking", 0, 0) },
-    { id = Enum.Profession.Tailoring, name = "Tailoring", icon = CreateAtlasMarkup("Mobile-Tailoring", 0, 0) },
+    { id = Enum.Profession.Alchemy, name = "Alchemy", atlas = "Mobile-Alchemy" },
+    { id = Enum.Profession.Blacksmithing, name = "Blacksmithing", atlas = "Mobile-Blacksmithing" },
+    { id = Enum.Profession.Enchanting, name = "Enchanting", atlas = "Mobile-Enchanting" },
+    { id = Enum.Profession.Engineering, name = "Engineering", atlas = "Mobile-Enginnering" }, -- blizzard typo
+    { id = Enum.Profession.Inscription, name = "Inscription", atlas = "Mobile-Inscription" },
+    { id = Enum.Profession.Jewelcrafting, name = "Jewelcrafting", atlas = "Mobile-Jewelcrafting" },
+    { id = Enum.Profession.Leatherworking, name = "Leatherworking", atlas = "Mobile-Leatherworking" },
+    { id = Enum.Profession.Tailoring, name = "Tailoring", atlas = "Mobile-Tailoring" },
   }
-  local professionIcons = {}
+  local professionIcons, professionAtlases = {}, {}
   for _, profession in ipairs(ns.randomThings.craftingOrders.notifyProfessions) do
+    profession.icon = CreateAtlasMarkup(profession.atlas, 0, 0)
     professionIcons[profession.id] = profession.icon
+    professionAtlases[profession.id] = profession.atlas
   end
+  ns.randomThings.craftingOrders.professionAtlases = professionAtlases
 
   local clockIcon = CreateSimpleTextureMarkup(string.format([[Interface\AddOns\%s\media\icons\clock.tga]], addon_name), 0, 0)
 
@@ -80,6 +83,24 @@ do -- crafting orders
       return string.format(" %s seen %dh %dm ago", clockIcon, hours, minutes)
     end
     return string.format(" %s seen %dm ago", clockIcon, minutes)
+  end
+  ns.randomThings.craftingOrders.FormatSeen = formatSeen
+
+  ---placed by any character on this account, not just the one we're logged in on
+  ---@param order wowutils_craftingOrder
+  ---@return boolean
+  local function isOwnOrder(order)
+    return WowUtilsDB.ownCharacters[ns.mapping.ConvertPartialGuidToGuid(order.customerGuid)] ~= nil
+  end
+  ns.randomThings.craftingOrders.IsOwnOrder = isOwnOrder
+
+  ---same filter the notifications use, the work orders tab groups by it too
+  ---@param professionId number
+  ---@param order wowutils_craftingOrder
+  ---@return boolean
+  function ns.randomThings.craftingOrders.MatchesNotifySettings(professionId, order)
+    local o = WowUtilsDB.options.craftingOrders
+    return o.professions[professionId] and not order.isDone and not isOwnOrder(order) and (order.tip or 0) >= o.tipThreshold or false
   end
 
   ---@param professionId number
@@ -121,9 +142,8 @@ do -- crafting orders
     local o = WowUtilsDB.options.craftingOrders
     if not o.professions[professionId] then return end
     local known = previous and previous.orders or {}
-    local myGuid = ns.mapping.ConvertGuidToMsgFormat(ns.me.guid)
     for orderId, order in pairs(current.orders) do
-      if not known[orderId] and not order.isDone and order.customerGuid ~= myGuid and (order.tip or 0) >= o.tipThreshold then
+      if not known[orderId] and ns.randomThings.craftingOrders.MatchesNotifySettings(professionId, order) then
         local _, classFile, _, _, _, customerName = GetPlayerInfoByGUID(ns.mapping.ConvertPartialGuidToGuid(order.customerGuid))
         customerName = customerName or "?"
         -- class only comes back when the client has seen that player, so this stays uncolored for strangers
@@ -365,6 +385,9 @@ do -- crafting orders
       end
     end
     ns.randomThings.craftingOrders.PruneExpired(guildCache)
+    if ns.gui and ns.gui.OnCraftingOrdersChanged then
+      ns.gui:OnCraftingOrdersChanged()
+    end
     return sendBack
   end
 
@@ -379,6 +402,46 @@ do -- crafting orders
       end
     end
     return false
+  end
+
+  ---@class wowutils_activeCraftingOrder
+  ---@field professionId number
+  ---@field orderId number
+  ---@field order wowutils_craftingOrder
+  ---@field isOwn boolean
+  ---@field matches boolean passes the notification settings
+  ---@field seenAt number server time, best guess at when the order went up
+
+  ---open orders of the current guild, expired and done ones left out
+  ---@return wowutils_activeCraftingOrder[]? nil when not in a guild
+  function ns.randomThings.craftingOrders.GetActiveOrders()
+    if not (ns.me.guildInfo and ns.me.guildInfo.dbSlug) then return nil end
+    local list = {}
+    local guildCache = ns.randomThings.craftingOrders.GetGuildCache()
+    if not guildCache then return list end
+    ns.randomThings.craftingOrders.PruneExpired(guildCache)
+    for professionId, professionData in pairs(guildCache) do
+      for orderId, order in pairs(professionData.orders) do
+        if not order.isDone then
+          tinsert(list, {
+            professionId = professionId,
+            orderId = orderId,
+            order = order,
+            isOwn = isOwnOrder(order),
+            matches = ns.randomThings.craftingOrders.MatchesNotifySettings(professionId, order),
+            -- same fallback the notifications use for entries from before first seen was tracked
+            seenAt = getFirstSeen(order) or order.updated or professionData.lastScan or 0,
+          })
+        end
+      end
+    end
+    return list
+  end
+
+  local function onCacheChanged()
+    if ns.gui and ns.gui.OnCraftingOrdersChanged then
+      ns.gui:OnCraftingOrdersChanged()
+    end
   end
 
   -- customer side: adds our own active guild orders to the cache, inactive ones get tagged as done
@@ -431,6 +494,7 @@ do -- crafting orders
     ns.Debug.print("my orders scan: %s total, %s added, %s done changed", #orders, added, tagged)
     if changed then
       ns.communication.SendCraftingOrders()
+      onCacheChanged()
     end
   end
 
@@ -518,6 +582,7 @@ do -- crafting orders
     notifyNewOrders(professionId, guildCache[professionId], scanned)
     guildCache[professionId] = scanned
     ns.communication.SendCraftingOrders()
+    onCacheChanged()
   end
 
   ---@param professionId number
@@ -584,7 +649,7 @@ do -- crafting orders
   end
 end
 
-do -- dungeons done
+if ns.IsRetail then -- dungeons done
   ns.randomThings.dungeonsDone = {}
   function ns.randomThings.dungeonsDone.CHALLENGE_MODE_MAPS_UPDATE(...)
     local t = C_MythicPlus.GetRunHistory(true, true)
@@ -594,5 +659,43 @@ do -- dungeons done
     end
     ns.Debug.AddToDevTool(temp, "WowUtils:DungeonsDone")
     ns.database.SaveToCurrentCharacterDB(ns.enums.context.dungeonsDone, nil, temp)
+  end
+end
+
+if ns.IsForever then -- loot tracking
+  ns.randomThings.lootWindows = {}
+  function ns.randomThings.lootWindows.LOOT_READY(autoLoot)
+    local newGuids = {}
+    for slot = 1, GetNumLootItems() do
+      local sourceData = { GetLootSourceInfo(slot) }
+      local lootIcon, lootName, lootQuantity, currencyID, lootQuality, locked, isQuestItem, questID, isActive, isCoin = GetLootSlotInfo(slot)
+      if not isCoin then
+        local lootData = {
+          currencyId = currencyID,
+          questId = questID,
+          itemLink = GetLootSlotLink(slot)
+        }
+        for j = 1, #sourceData, 2 do
+          local _t = CopyTable(lootData)
+          _t.count = sourceData[j + 1] or 1
+          local sourceGuid = sourceData[j]
+          if not issecretvalue(sourceGuid) then
+            if not WowUtilsDB.localData.lootWindows[sourceGuid] then
+              newGuids[sourceGuid] = true
+              WowUtilsDB.localData.lootWindows[sourceGuid] = {
+                seen = GetServerTime(),
+                characterGuid = ns.me.guid,
+                items = {}
+              }
+            end
+            if newGuids[sourceGuid] then
+              tinsert(WowUtilsDB.localData.lootWindows[sourceGuid].items, _t)
+            end
+          else
+            ns.Debug.print("Loot source guid was secret.")
+          end
+        end
+      end
+    end
   end
 end

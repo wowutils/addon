@@ -20,13 +20,19 @@ local addon_name, ns = ...
 ---@class wowutilsData_import_syncList
 ---@field listId string
 ---@field listVersion number update time
----@field characters wowutilsData_import_syncList_characters[]
+---@field characters wowutilsData_import_syncList_characters[]|wowutilsData_import_syncList_characters_forever[]
 
 ---@class wowutilsData_import_syncList_characters
 ---@field id number
 ---@field name string
 ---@field realmId number
 ---@field realm string
+---@field region string
+
+---@class wowutilsData_import_syncList_characters_forever
+---@field id number
+---@field name string
+---@field surname string
 ---@field region string
 
 ---@class wowutilsData_import_character
@@ -307,65 +313,68 @@ function ns.dataImport.ImportDroptimizers()
   -- character who is still in the file but hasn't re-simmed would have their old sims swept at
   -- login and then written straight back the next time the file changes
   local simKeepThreshold = GetServerTime() - ns.config.droptimizerKeepTime
-  for _, groupData in pairs(t.groups) do
-    incomingGroups[groupData.groupId] = true
-    for _, charData in pairs(groupData.characters) do
-      local charKey = sformat("%s-%s", charData.characterName:lower(), charData.realmId)
-      incomingChars[charKey] = true
-      if not incomingSims[charKey] then
-        incomingSims[charKey] = {}
-      end
-      for _, droptimizerData in pairs(charData.droptimizers) do
-        local simType, validSim = private.GetSimType(droptimizerData.simType)
-        if validSim and droptimizerData.specId and (droptimizerData.simmedAt or 0) >= simKeepThreshold then
-          if not incomingSims[charKey][droptimizerData.specId] then
-            incomingSims[charKey][droptimizerData.specId] = {}
+  if ns.IsRetail then -- droptimizers are disabled in forever for now
+    for _, groupData in pairs(t.groups) do
+      incomingGroups[groupData.groupId] = true
+      for _, charData in pairs(groupData.characters) do
+        local charKey = sformat("%s-%s", charData.characterName:lower(), charData.realmId)
+        incomingChars[charKey] = true
+        if not incomingSims[charKey] then
+          incomingSims[charKey] = {}
+        end
+        for _, droptimizerData in pairs(charData.droptimizers) do
+          local simType, validSim = private.GetSimType(droptimizerData.simType)
+          if validSim and droptimizerData.specId and (droptimizerData.simmedAt or 0) >= simKeepThreshold then
+            if not incomingSims[charKey][droptimizerData.specId] then
+              incomingSims[charKey][droptimizerData.specId] = {}
+            end
+            incomingSims[charKey][droptimizerData.specId][private.GetDroptimizerId(simType, droptimizerData)] = true
           end
-          incomingSims[charKey][droptimizerData.specId][private.GetDroptimizerId(simType, droptimizerData)] = true
         end
       end
     end
   end
-
   ---@type table<string, boolean> characters we read from this file, and may therefore prune
   local refreshed = {}
   for _, groupData in pairs(t.groups) do
-    for _, charData in pairs(groupData.characters) do
-      local charKey = sformat("%s-%s", charData.characterName:lower(), charData.realmId)
-      if shouldUpdateDroptimizer(charKey, charData, t.writtenAt, force) then
-        refreshed[charKey] = true
-        local targetDB = WowUtilsDB.droptimizerData[charKey]
-        targetDB.groupId = groupData.groupId
-        -- droptimizers first
-        for _, droptimizerData in pairs(charData.droptimizers) do
-          local simType, validSim = private.GetSimType(droptimizerData.simType)
-          if validSim and (droptimizerData.simmedAt or 0) >= simKeepThreshold then
-            local droptimizerId = private.GetDroptimizerId(simType, droptimizerData)
-            if droptimizerData.specId then
-              if not targetDB.specs[droptimizerData.specId] then
-                targetDB.specs[droptimizerData.specId] = {}
+    if ns.IsRetail then -- droptimizers are disabled in forever for now
+      for _, charData in pairs(groupData.characters) do
+        local charKey = sformat("%s-%s", charData.characterName:lower(), charData.realmId)
+        if shouldUpdateDroptimizer(charKey, charData, t.writtenAt, force) then
+          refreshed[charKey] = true
+          local targetDB = WowUtilsDB.droptimizerData[charKey]
+          targetDB.groupId = groupData.groupId
+          -- droptimizers first
+          for _, droptimizerData in pairs(charData.droptimizers) do
+            local simType, validSim = private.GetSimType(droptimizerData.simType)
+            if validSim and (droptimizerData.simmedAt or 0) >= simKeepThreshold then
+              local droptimizerId = private.GetDroptimizerId(simType, droptimizerData)
+              if droptimizerData.specId then
+                if not targetDB.specs[droptimizerData.specId] then
+                  targetDB.specs[droptimizerData.specId] = {}
+                end
+                -- a forced pass rewrites the sim even when it has not been re-simmed. the timestamp
+                -- only tells us the sim is the same one, not that we stored everything it carries:
+                -- a db upgrade that starts keeping new fields has to re-read what is already there
+                local storedSim = targetDB.specs[droptimizerData.specId][droptimizerId]
+                if force or not storedSim or storedSim.simmedAt < droptimizerData.simmedAt then
+                  ---@type wowutilsDroptimizerData_sims
+                  targetDB.specs[droptimizerData.specId][droptimizerId] = {
+                    items    = private.ParseDroptimizerItems(droptimizerData.items),
+                    simType  = simType,
+                    baseline = droptimizerData.baselineDps,
+                    simmedAt = droptimizerData.simmedAt
+                  }
+                end
+              else
+                print("WOWUTILS ERROR: NO SPECID", charData.characterId, droptimizerData.profileKey)
               end
-              -- a forced pass rewrites the sim even when it has not been re-simmed. the timestamp
-              -- only tells us the sim is the same one, not that we stored everything it carries:
-              -- a db upgrade that starts keeping new fields has to re-read what is already there
-              local storedSim = targetDB.specs[droptimizerData.specId][droptimizerId]
-              if force or not storedSim or storedSim.simmedAt < droptimizerData.simmedAt then
-                ---@type wowutilsDroptimizerData_sims
-                targetDB.specs[droptimizerData.specId][droptimizerId] = {
-                  items = private.ParseDroptimizerItems(droptimizerData.items),
-                  simType = simType,
-                  baseline = droptimizerData.baselineDps,
-                  simmedAt  = droptimizerData.simmedAt
-                }
-              end
-            else
-              print("WOWUTILS ERROR: NO SPECID", charData.characterId, droptimizerData.profileKey)
             end
           end
+          -- just replace the whole thing if our data is newer
+          targetDB.wishlist = private.ParseWishlistItems(charData.wishlist, groupData.wishlistMapping)
+          targetDB.lastUpdate = t.writtenAt
         end
-        -- just replace the whole thing if our data is newer
-        targetDB.wishlist = private.ParseWishlistItems(charData.wishlist, groupData.wishlistMapping)
-        targetDB.lastUpdate = t.writtenAt
       end
     end
     if groupData.syncList then
@@ -381,44 +390,51 @@ function ns.dataImport.ImportDroptimizers()
         local targetList = WowUtilsDB.syncLists[groupData.syncList.listId]
         targetList.lastUpdate = groupData.syncList.listVersion
         for _, charData in pairs(groupData.syncList.characters) do
-          targetList.characters[charData.id] = sformat("%s-%s", charData.name:lower(), charData.realmId)
+          if ns.IsRetail then
+            ---@cast charData wowutilsData_import_syncList_characters
+            targetList.characters[charData.id] = sformat("%s-%s", charData.name:lower(), charData.realmId)
+          else -- forever
+            ---@cast charData wowutilsData_import_syncList_characters_forever
+            targetList.characters[charData.id] = sformat("%s-%s", charData.name:lower(), charData.surname:lower())
+          end
         end
       end
     end
   end
-
-  -- drop sims the file no longer lists. only for characters we just read: anything else may
-  -- be holding newer data synced from a guildmate, which legitimately contains sims this file
-  -- doesn't know about yet
-  for charKey in pairs(refreshed) do
-    local specs = WowUtilsDB.droptimizerData[charKey].specs
-    local keep = incomingSims[charKey]
-    for specId, sims in pairs(specs) do
-      local keepForSpec = keep and keep[specId]
-      for simId in pairs(sims) do
-        if not (keepForSpec and keepForSpec[simId]) then
-          ns.Debug.print("removing droptimizer '%s' (spec %s) from '%s'", simId, tostring(specId), charKey)
-          sims[simId] = nil
+  if ns.IsRetail then -- droptimizers are disabled in forever for now
+    -- drop sims the file no longer lists. only for characters we just read: anything else may
+    -- be holding newer data synced from a guildmate, which legitimately contains sims this file
+    -- doesn't know about yet
+    for charKey in pairs(refreshed) do
+      local specs = WowUtilsDB.droptimizerData[charKey].specs
+      local keep = incomingSims[charKey]
+      for specId, sims in pairs(specs) do
+        local keepForSpec = keep and keep[specId]
+        for simId in pairs(sims) do
+          if not (keepForSpec and keepForSpec[simId]) then
+            ns.Debug.print("removing droptimizer '%s' (spec %s) from '%s'", simId, tostring(specId), charKey)
+            sims[simId] = nil
+          end
+        end
+        if not next(sims) then
+          specs[specId] = nil
         end
       end
-      if not next(sims) then
-        specs[specId] = nil
-      end
     end
-  end
 
-  -- characters whose group is still in the file but who are no longer part of it. clear the
-  -- entry rather than removing it: mapping.lua only rejects incoming droptimizer data when it
-  -- already holds a newer entry, so a nil entry would let that character sync their stale copy
-  -- straight back to us. the cleanup sweep in database.lua reaps the empty shell later.
-  for charKey, charDB in pairs(WowUtilsDB.droptimizerData) do
-    if charDB.groupId and incomingGroups[charDB.groupId] and not incomingChars[charKey] then
-      if (charDB.specs and next(charDB.specs)) or (charDB.wishlist and next(charDB.wishlist)) then
-        ns.Debug.print("clearing droptimizer data for '%s', no longer part of group '%s'", charKey, charDB.groupId)
-        if charDB.specs then wipe(charDB.specs) end
-        if charDB.wishlist then wipe(charDB.wishlist) end
-        if (charDB.lastUpdate or 0) < t.writtenAt then
-          charDB.lastUpdate = t.writtenAt
+    -- characters whose group is still in the file but who are no longer part of it. clear the
+    -- entry rather than removing it: mapping.lua only rejects incoming droptimizer data when it
+    -- already holds a newer entry, so a nil entry would let that character sync their stale copy
+    -- straight back to us. the cleanup sweep in database.lua reaps the empty shell later.
+    for charKey, charDB in pairs(WowUtilsDB.droptimizerData) do
+      if charDB.groupId and incomingGroups[charDB.groupId] and not incomingChars[charKey] then
+        if (charDB.specs and next(charDB.specs)) or (charDB.wishlist and next(charDB.wishlist)) then
+          ns.Debug.print("clearing droptimizer data for '%s', no longer part of group '%s'", charKey, charDB.groupId)
+          if charDB.specs then wipe(charDB.specs) end
+          if charDB.wishlist then wipe(charDB.wishlist) end
+          if (charDB.lastUpdate or 0) < t.writtenAt then
+            charDB.lastUpdate = t.writtenAt
+          end
         end
       end
     end

@@ -11,7 +11,7 @@ local wishlistColumnName = "wishlist"
 ns.rclc = {}
 local private = {}
 local rclcMod
-if C_AddOns.IsAddOnLoaded("RCLootCouncil") then
+if ns.IsRetail and C_AddOns.IsAddOnLoaded("RCLootCouncil") then
   ns.rclc.actualAddon = LibStub("AceAddon-3.0"):GetAddon("RCLootCouncil", true)
   if ns.rclc.actualAddon then
     rclcMod = ns.rclc.actualAddon:NewModule(moduleName, "AceHook-3.0")
@@ -38,7 +38,7 @@ do
     end)
   end
 end
-
+if not rclcMod then return end
 do
   local currencyData = {}
   for i, mapIdToFind in pairs({
@@ -47,7 +47,7 @@ do
     { 2, ns.enums.itemTrack.champion },
     { 1, ns.enums.itemTrack.veteran },
     { 5, "convert" },
-    { 6, "bonusCoin"}, }) do
+    { 6, "bonusCoin" }, }) do
     for currencyId, mapId in pairs(ns.config.currencies) do
       if mapIdToFind[1] == mapId then
         local ci = C_CurrencyInfo.GetCurrencyInfo(currencyId)
@@ -260,6 +260,7 @@ do
     end
     return nil
   end
+
   ---0 means "no slot", both for items that have none (tier tokens) and for slot strings the import
   ---could not parse. Comparing those as a value makes every unknown match every other unknown, so
   ---a token would pull in whatever item happened to fail parsing.
@@ -527,8 +528,8 @@ do
               -- converts from the item being looted, so repeating its icon would say nothing --
               -- only whether the catalyst is involved adds anything
               label = C_Item.GetItemNameByID(paired.itemId)
-                or ns.helpers.GetEquipmentSlotName(paired.entry.equipmentSlot)
-                or tostring(paired.itemId)
+                  or ns.helpers.GetEquipmentSlotName(paired.entry.equipmentSlot)
+                  or tostring(paired.itemId)
               if paired.entry.sourceItem and paired.entry.sourceItem.catalyst then
                 paired.row.catalyst = true
               end
@@ -641,7 +642,6 @@ do
   end
 end
 
-if not rclcMod then return end
 --#region voting window
 function rclcMod:OnInitialize()
   C_Timer.After(1, function() rclcMod:InitialSetup() end)
@@ -736,9 +736,12 @@ local function getRowKeys(name)
   if stored and stored.droptimizerKey then
     return guid, stored.droptimizerKey
   end
-  local n, s = ns.helpers.SplitFullName(name)
-  local realmId = s and ns.GetRealmId(nil, s) or ns.me.realmId
-  return guid, sformat("%s-%s", n:lower(), realmId)
+  if ns.IsRetail then
+    local n, s = ns.helpers.SplitFullName(name)
+    local realmId = s and ns.GetRealmId(nil, s) or ns.me.realmId
+    return guid, sformat("%s-%s", n:lower(), realmId)
+  end
+  return guid, name:gsub(" ", "-"):lower()
 end
 
 ---Hover on any of our cells shows the full per-candidate breakdown for the viewed item.

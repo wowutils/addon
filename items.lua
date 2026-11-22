@@ -78,18 +78,23 @@ local tempItemCache = {
   [ns.enums.itemCacheType.bank] = {},
   [ns.enums.itemCacheType.warbank] = {}
 }
-local function isLegitWarboundItem(itemLocation)
-    return C_Item.IsBoundToAccountUntilEquip(itemLocation) and not C_Item.IsBound(itemLocation)
+if ns.IsRetail then
+  function private.isLegitWarboundItem(itemLocation)
+      return C_Item.IsBoundToAccountUntilEquip(itemLocation) and not C_Item.IsBound(itemLocation)
+  end
+else -- forever
+  function private.isLegitWarboundItem(itemLocation)
+      return false
+  end
 end
 local function handleItemOnLoad(item, target, itemLink, instantItemData)
   -- the slot can change while the item loads (sorted, sold, swapped), there's nothing left to read then
   if item:IsItemEmpty() then return end
   --if item:GetItemQuality() ~= Enum.ItemQuality.Epic and target ~= "equipment" then
   --some sections only care about epic items
-  local isEpicItem = item:GetItemQuality() == Enum.ItemQuality.Epic
   local itemLevel = item:GetCurrentItemLevel()
   local isLowItemLevel = (itemLevel or 0) < ns.config.itemCacheMinIlvl
-  local potentialIgnore = isLowItemLevel or not isEpicItem
+  local potentialIgnore = isLowItemLevel or ((item:GetItemQuality() or 0) >= ns.config.bagCacheMinQuality)
   local cache = tempItemCache[target]
   if target == ns.enums.itemCacheType.warbank then
     if true then return end -- left here so its easy to enable once we want it
@@ -102,7 +107,7 @@ local function handleItemOnLoad(item, target, itemLink, instantItemData)
     return
   end
   if target == ns.enums.itemCacheType.bank then
-    local warbound = isLegitWarboundItem(item:GetItemLocation())
+    local warbound = private.isLegitWarboundItem(item:GetItemLocation())
     if potentialIgnore then return end
     if not (warbound or (C_Item.IsBound(item:GetItemLocation()) and not ns.items.IsTradeableItem(item:GetItemGUID()))) then return end
     cache[item:GetItemGUID()] = {
@@ -123,7 +128,7 @@ local function handleItemOnLoad(item, target, itemLink, instantItemData)
     return
   end
   if target == ns.enums.itemCacheType.bags then
-    local warbound = isLegitWarboundItem(item:GetItemLocation())
+    local warbound = private.isLegitWarboundItem(item:GetItemLocation())
     if potentialIgnore then return end
     if not (warbound or (C_Item.IsBound(item:GetItemLocation()) and not ns.items.IsTradeableItem(item:GetItemGUID()))) then return end
     cache[item:GetItemGUID()] = {
@@ -198,7 +203,9 @@ do
       handleItemOnLoad(item, ns.enums.itemCacheType.equipped, slot)
       saveItemsIfChanged(ns.enums.itemCacheType.equipped)
     end)
-    ns.items.CacheWatermarks()
+    if ns.IsRetail then
+      ns.items.CacheWatermarks()
+    end
   end
 end
 do
@@ -231,7 +238,8 @@ do
   end
 end
 do
-  local normalBags = { Enum.BagIndex.Backpack, Enum.BagIndex.Bag_1, Enum.BagIndex.Bag_2, Enum.BagIndex.Bag_3, Enum.BagIndex.Bag_4, Enum.BagIndex.ReagentBag }
+  local normalBags = ns.IsRetail and { Enum.BagIndex.Backpack, Enum.BagIndex.Bag_1, Enum.BagIndex.Bag_2, Enum.BagIndex.Bag_3, Enum.BagIndex.Bag_4, Enum.BagIndex.ReagentBag } or
+    { Enum.BagIndex.Backpack, Enum.BagIndex.Bag_1, Enum.BagIndex.Bag_2, Enum.BagIndex.Bag_3, Enum.BagIndex.Bag_4}
   local bagTimer
   function private.ScanBags()
     if InCombatLockdown() then -- we don't wanna do any caching during combat, just do it after combat ends
@@ -271,7 +279,9 @@ end
 do
   local scanTimer
   function ns.items.BAG_UPDATE_DELAYED(...)
-    ns.items.CacheCraftingItems()
+    if ns.IsRetail then
+      ns.items.CacheCraftingItems()
+    end
     if scanTimer then scanTimer:Cancel() end
     scanTimer = C_Timer.NewTimer(0.2, function()
       private.ScanBags()
@@ -301,6 +311,7 @@ do
     fullscanTimer = C_Timer.NewTimer(2, function()
       saveItemsIfChanged(ns.enums.itemCacheType.equipped)
     end)
+    if ns.IsForever then return end
     ns.items.CacheWatermarks()
   end
 end
@@ -312,10 +323,11 @@ function ns.items.InitialCaching()
   end
   private.ScanBags()
   private.ScanAllEquippedItems()
+  if ns.IsForever then return end
   ns.items.CacheCraftingItems()
 end
 
-do
+if ns.IsRetail then
   ---@diagnostic disable-next-line: undefined-global
   local warboundUntilEquipText = ITEM_BIND_TO_ACCOUNT_UNTIL_EQUIP -- "Binds to Warband until equipped" still shows Binds to Warband on itemtooltip itself??
   ---@param itemlink string
@@ -356,7 +368,7 @@ end
 
 -- TODO bonus coin history based on tooltips (tooltips are not working atm ingame at all)
 
-do -- item -> journal encounter lookup, scanned from the encounter journal after login
+if ns.IsRetail then -- item -> journal encounter lookup, scanned from the encounter journal after login
   -- journal selection and loot filters are global state the EJ ui reads too, so every step selects what it needs,
   -- reads a few items and puts everything back before yielding. steps are skipped while the journal is open or in combat
   local itemsPerStep = 10

@@ -61,131 +61,137 @@ do
 end
 
 do
-  local map = {
-    -- Midnight S1
-    ["12769"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_1
-    ["12770"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_2
-    ["12771"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_3
-    ["12772"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_4
-    ["12773"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_5
-    ["12774"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_6
-    ["12775"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_7
-    ["12776"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_8
+  if ns.IsRetail then
+    local map = {
+      -- Midnight S1
+      ["12769"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_1
+      ["12770"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_2
+      ["12771"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_3
+      ["12772"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_4
+      ["12773"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_5
+      ["12774"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_6
+      ["12775"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_7
+      ["12776"] = ns.enums.itemTrack.adventurer, -- UpgradeTrack_Adventurer_8
 
-    ["12777"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_1
-    ["12778"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_2
-    ["12779"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_3
-    ["12780"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_4
-    ["12781"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_5
-    ["12782"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_6
-    ["12783"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_7
-    ["12784"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_8
+      ["12777"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_1
+      ["12778"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_2
+      ["12779"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_3
+      ["12780"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_4
+      ["12781"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_5
+      ["12782"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_6
+      ["12783"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_7
+      ["12784"] = ns.enums.itemTrack.veteran,    -- UpgradeTrack_Veteran_8
 
-    ["12785"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_1
-    ["12786"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_2
-    ["12787"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_3
-    ["12788"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_4
-    ["12789"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_5
-    ["12790"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_6
-    ["12791"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_7
-    ["12792"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_8
+      ["12785"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_1
+      ["12786"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_2
+      ["12787"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_3
+      ["12788"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_4
+      ["12789"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_5
+      ["12790"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_6
+      ["12791"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_7
+      ["12792"] = ns.enums.itemTrack.champion,   -- UpgradeTrack_Champion_8
 
-    ["12793"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_1
-    ["12794"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_2
-    ["12795"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_3
-    ["12796"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_4
-    ["12797"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_5
-    ["12798"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_6
-    ["12799"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_7
-    ["12800"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_8
-    ["13787"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_9 sporefused
-    ["13653"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_10 voidforged
+      ["12793"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_1
+      ["12794"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_2
+      ["12795"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_3
+      ["12796"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_4
+      ["12797"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_5
+      ["12798"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_6
+      ["12799"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_7
+      ["12800"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_8
+      ["13787"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_9 sporefused
+      ["13653"] = ns.enums.itemTrack.hero,       -- UpgradeTrack_Hero_10 voidforged
 
-    ["12801"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_1
-    ["12802"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_2
-    ["12803"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_3
-    ["12804"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_4
-    ["12805"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_5
-    ["12806"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_6
-    ["12807"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_7
-    ["12808"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_8
-    ["13654"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_10 voidforged
-    ["13786"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_9 sporefused
+      ["12801"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_1
+      ["12802"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_2
+      ["12803"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_3
+      ["12804"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_4
+      ["12805"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_5
+      ["12806"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_6
+      ["12807"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_7
+      ["12808"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_8
+      ["13654"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_10 voidforged
+      ["13786"] = ns.enums.itemTrack.myth,       -- UpgradeTrack_Myth_9 sporefused
 
-    -- Midnight S2
-    
-    ["12817"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_1
-    ["12818"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_2
-    ["12819"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_3
-    ["12820"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_4
-    ["12821"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_5
-    ["12822"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_6
-    ["12823"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_7
-    ["12824"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_8
+      -- Midnight S2
+      
+      ["12817"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_1
+      ["12818"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_2
+      ["12819"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_3
+      ["12820"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_4
+      ["12821"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_5
+      ["12822"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_6
+      ["12823"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_7
+      ["12824"] = ns.enums.itemTrack.adventurer,-- UpgradeTrack_Adventurer_8
 
-    ["12825"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_1
-    ["12826"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_2
-    ["12827"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_3
-    ["12828"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_4
-    ["12829"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_5
-    ["12830"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_6
-    ["12831"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_7
-    ["12832"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_8
+      ["12825"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_1
+      ["12826"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_2
+      ["12827"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_3
+      ["12828"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_4
+      ["12829"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_5
+      ["12830"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_6
+      ["12831"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_7
+      ["12832"] = ns.enums.itemTrack.veteran,-- UpgradeTrack_Veteran_8
 
-    ["12833"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_1
-    ["12834"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_2
-    ["12835"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_3
-    ["12836"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_4
-    ["12837"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_5
-    ["12838"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_6
-    ["12839"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_7
-    ["12840"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_8
+      ["12833"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_1
+      ["12834"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_2
+      ["12835"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_3
+      ["12836"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_4
+      ["12837"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_5
+      ["12838"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_6
+      ["12839"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_7
+      ["12840"] = ns.enums.itemTrack.champion,-- UpgradeTrack_Champion_8
 
-    ["12841"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_1
-    ["12842"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_2
-    ["12843"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_3
-    ["12844"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_4
-    ["12845"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_5
-    ["12846"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_6
-    ["12847"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_7
-    ["12848"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_8
-    --["123456789"] = ,-- UpgradeTrack_Hero_9 NYI
-    --["123456789"] = ,-- UpgradeTrack_Hero_10 NYI
+      ["12841"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_1
+      ["12842"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_2
+      ["12843"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_3
+      ["12844"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_4
+      ["12845"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_5
+      ["12846"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_6
+      ["12847"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_7
+      ["12848"] = ns.enums.itemTrack.hero,-- UpgradeTrack_Hero_8
+      --["123456789"] = ,-- UpgradeTrack_Hero_9 NYI
+      --["123456789"] = ,-- UpgradeTrack_Hero_10 NYI
 
-    ["12849"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_1
-    ["12850"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_2
-    ["12851"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_3
-    ["12852"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_4
-    ["12853"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_5
-    ["12854"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_6
-    ["12855"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_7
-    ["12856"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_8
-    ["13848"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_9 very rare?
-    --["123456879"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_10 NYI
+      ["12849"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_1
+      ["12850"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_2
+      ["12851"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_3
+      ["12852"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_4
+      ["12853"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_5
+      ["12854"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_6
+      ["12855"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_7
+      ["12856"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_8
+      ["13848"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_9 very rare?
+      --["123456879"] = ns.enums.itemTrack.myth,-- UpgradeTrack_Myth_10 NYI
 
-  }
-  local contextToItemTrack = {
-    ["raid-finder"] = ns.enums.itemTrack.veteran,
-    ["raid-normal"] = ns.enums.itemTrack.champion,
-    ["raid-heroic"] = ns.enums.itemTrack.hero,
-    ["raid-mythic"] = ns.enums.itemTrack.myth,
-    --challenge-mode-jackpot
-    --challenge-mode
-  }
-  ---@param itemLink string
-  ---@return wowutils_enums_itemTrack itemTrack
-  function ns.helpers.GetItemTrack(itemLink) -- just use bonus ids so we don't have to worry about any weirdness between localizations and items that cannot be upgraded
-    -- TODO optimize? probably cba
-    local t = { strsplit(":", itemLink) }
-    for k, v in pairs(t) do -- this should find all real drops
-      if map[v] then
-        return map[v]
+    }
+    local contextToItemTrack = {
+      ["raid-finder"] = ns.enums.itemTrack.veteran,
+      ["raid-normal"] = ns.enums.itemTrack.champion,
+      ["raid-heroic"] = ns.enums.itemTrack.hero,
+      ["raid-mythic"] = ns.enums.itemTrack.myth,
+      --challenge-mode-jackpot
+      --challenge-mode
+    }
+    ---@param itemLink string
+    ---@return wowutils_enums_itemTrack itemTrack
+    function ns.helpers.GetItemTrack(itemLink) -- just use bonus ids so we don't have to worry about any weirdness between localizations and items that cannot be upgraded
+      -- TODO optimize? probably cba
+      local t = { strsplit(":", itemLink) }
+      for k, v in pairs(t) do -- this should find all real drops
+        if map[v] then
+          return map[v]
+        end
       end
+      -- this should catch tooltips from encounter journal etc
+      local _, context = C_Item.GetItemCreationContext(itemLink)
+      -- just ignore the rest for now TODO maybe do something about it?
+      return context and contextToItemTrack[context] or ns.enums.itemTrack.none
     end
-    -- this should catch tooltips from encounter journal etc
-    local _, context = C_Item.GetItemCreationContext(itemLink)
-    -- just ignore the rest for now TODO maybe do something about it?
-    return context and contextToItemTrack[context] or ns.enums.itemTrack.none
+  else -- forever
+    function ns.helpers.GetItemTrack(itemLink)
+      return ns.enums.itemTrack.none
+    end
   end
 end
 
@@ -218,7 +224,7 @@ end
 ---@param name string "Name" or "Name-Realm"
 ---@return string charName
 ---@return string? realm nil when the name carries no realm at all
-function ns.helpers.SplitFullName(name)
+function ns.helpers.SplitFullName(name) -- should work just as well in forever (?)
   local charName, realm = strsplit("-", name, 2)
   return charName, (realm ~= nil and realm ~= "") and realm or nil
 end
@@ -451,4 +457,22 @@ function ns.helpers.IsNewerAddonVersion(version1, version2)
   if _compare1.major ~= _compare2.major then return _compare1.major > _compare2.major end
   if _compare1.minor ~= _compare2.minor then return _compare1.minor > _compare2.minor end
   return _compare1.patch > _compare2.patch
+end
+
+if ns.IsRetail then return end
+-- forever helpers
+
+function ns.helpers.Forever_FullName(unit)
+  local firstName, lastName = UnitName(unit or "player")
+  return firstName .. " " .. lastName
+end
+
+function ns.helpers.Forever_GetSlug(unit)
+  local firstName, lastName = UnitName(unit or "player")
+  return (firstName .. "-" .. lastName):lower()
+end
+
+function ns.helpers.Forever_GetFullName(unit)
+  local firstName, lastName = UnitName(unit or "player")
+  return firstName .. " " .. lastName
 end
